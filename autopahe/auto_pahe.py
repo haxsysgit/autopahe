@@ -780,6 +780,16 @@ def command_main(args):
     if mdarg:
         multi_download_optimized(mdarg)
 
+def data_report(data = None,filepath = "autopahe_data.json",):
+    if data:
+        # Read existing JSON data from file
+        with open(filepath, 'r') as json_file:
+            existing_data = load(json_file)
+
+        existing_data.update(data)
+            
+        with open(filepath,"w") as st:
+            dump(existing_data,st)
         
 
 def main():
@@ -827,17 +837,12 @@ def main():
     else:
         # No command line arguments, run interactive mode
         interactive_main()
+        
+    if search_response_dict and jsonpage_dict:
+        final_data = {**search_response_dict,**jsonpage_dict}
+        data_report(data=final_data)
 
-def data_report(data = None,filepath = "autopahe_data.json",):
-    if data:
-        # Read existing JSON data from file
-        with open(filepath, 'r') as json_file:
-            existing_data = load(json_file)
 
-        existing_data.update(data)
-            
-        with open(filepath,"w") as st:
-            dump(existing_data,st)
 
 
 
@@ -845,12 +850,7 @@ if __name__ == '__main__':
     # INTRO BANNER
     Banners.header() 
     main()
-    final_data = {**search_response_dict,**jsonpage_dict}
-    data_report(data=final_data)
     
-
-
-# final_data = {**search_response_dict,**jsonpage_dict}
 
 n()
 

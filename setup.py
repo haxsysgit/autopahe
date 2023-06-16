@@ -8,7 +8,6 @@ setup(
     version = '1.0.0',
     author_email="pentacker@gmail.com",
     description = "A python script to automate downloads from animepahe",
-    long_description_content_type='text/markdown',
     url = "https://github.com/haxsysgit/autopahe",
     author = "Elenasulu Arinze",
     license = "MIT",
@@ -28,7 +27,7 @@ setup(
         'beautifulsoup4 >= 4.9.3',
         'selenium >= 3.141.0',
         'requests >= 2.25.1',
-        
+        'webdriver-manager >= 3.8.5',
         'tqdm >= 4.61.0',
     ],
     classifiers=[

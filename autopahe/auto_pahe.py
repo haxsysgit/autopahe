@@ -828,19 +828,7 @@ def main():
         # No command line arguments, run interactive mode
         interactive_main()
 
-
-
-
-if __name__ == '__main__':
-    # INTRO BANNER
-    Banners.header() 
-    main()
-
-
-final_data = {**search_response_dict,**jsonpage_dict}
-
-n()
-def data_report(filepath = "autopahe_data.json",data = None):
+def data_report(data = None,filepath = "autopahe_data.json",):
     if data:
         # Read existing JSON data from file
         with open(filepath, 'r') as json_file:
@@ -851,6 +839,20 @@ def data_report(filepath = "autopahe_data.json",data = None):
         with open(filepath,"w") as st:
             dump(existing_data,st)
 
+
+
+if __name__ == '__main__':
+    # INTRO BANNER
+    Banners.header() 
+    main()
+    final_data = {**search_response_dict,**jsonpage_dict}
+    data_report(data=final_data)
+    
+
+
+# final_data = {**search_response_dict,**jsonpage_dict}
+
+n()
 
 finish = time.perf_counter()
 

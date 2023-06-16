@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name = 'autopahe',
-    version = '1.0.0',
+    version = '0.0.1',
     author_email="pentacker@gmail.com",
     description = "A python script to automate downloads from animepahe",
     url = "https://github.com/haxsysgit/autopahe",

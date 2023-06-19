@@ -6,6 +6,7 @@ from selenium import webdriver
 from selenium.webdriver.firefox.service import Service as chrome_service
 from selenium.webdriver.chrome.service import Service as ff_service
 # from webdriver_manager.firefox import GeckoDriverManager
+# from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 
     
@@ -128,5 +129,5 @@ def kwik_download(url:str,posturl:str,browser: str = "firefox",dpath:str = os.ge
         print("Failed to download the MP4 file.\n")
         print(f"return code : {response.status_code}")
         
-    # progress(dsize)
+
 

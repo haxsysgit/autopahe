@@ -486,7 +486,7 @@ def interactive_main():
     Banners.i_info(info)
     
     # Handling episode to download prompt
-    download_type = str(input("""
+    download_type = input("""
     Enter the type of download facilty you want
     
     1. s or single_download for single episode download
@@ -495,7 +495,7 @@ def interactive_main():
     4. i for more in -depth info on the options above 
     
     >> """)
-    ).lower()
+    
     print("\n")
     ep_to_download = (input("    Enter episode(s) to download >> "))
     

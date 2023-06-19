@@ -4,7 +4,7 @@ import sys
 from json import loads,load,dump
 from re import search
 from bs4 import BeautifulSoup
-from kwikdown import kwik_download
+from .kwikdown import kwik_download
 import concurrent.futures as concur
 
 
@@ -254,7 +254,7 @@ def about():
 def download(arg = 1,barg:str = "firefox"):
     # using return value of the search function to get the page
     # using the json data from the page url to get page where the episodes to watch are
-
+    arg = int(arg)
     print()
 
     #session string of the stream episode
@@ -445,7 +445,8 @@ def multi_download_optimized(arg):
     
 
             
-def multi_download_verbose(eps: str):
+def multi_download_verbose(eps):
+    eps = str(eps)
     # given arg specifies '-' for range
     # New format for list comprehension  
     episodes = [
@@ -484,7 +485,7 @@ def interactive_main():
     Banners.i_info(info)
     
     # Handling episode to download prompt
-    download_type = input("""
+    download_type = str(input("""
     Enter the type of download facilty you want
     
     1. s or single_download for single episode download
@@ -492,15 +493,15 @@ def interactive_main():
     3. v or md_verbose for a verbose variant of the md function[SLOW]
     4. i for more in -depth info on the options above 
     
-    >> """)
+    >> """))
     print("\n")
     ep_to_download = (input("    Enter episode(s) to download >> "))
     
     switch = {
-        1:download,
-        2:multi_download_optimized,
-        3:multi_download_verbose,
-        4:info,
+        "1":download,
+        "2":multi_download_optimized,
+        "3":multi_download_verbose,
+        "4":info,
         's':download,
         'md':multi_download_optimized,
         'v':multi_download_verbose,

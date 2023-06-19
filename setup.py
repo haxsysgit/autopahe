@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name = 'autopahe',
-    version = '2.0',
+    version = '2.3.2',
     author_email="pentacker@gmail.com",
     description = "A python script to automate downloads from animepahe",
     url = "https://github.com/haxsysgit/autopahe",
@@ -13,10 +13,11 @@ setup(
     license = "MIT",
     py_modules = [
         'autopahe',
+
     ],
     package_dir = {'autopahe':'autopahe'},
     entry_points ={
-            'console_scripts': ['autopahe = autopahe.auto_pahe.py:main']
+            'console_scripts': ['autopahe = autopahe.auto_pahe:main']
     },
     include_package_data=True,
     packages = [

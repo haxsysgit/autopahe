@@ -378,18 +378,17 @@ def multi_download_optimized(arg):
     
     arg = str(arg)
 
-    if '-' in arg:
-        # parsing the arg to get individial eps
-        epr = list(x for x in arg.split('-'))
-
-        # list of the range of eps
-        episodes_list = list(range(int(epr[0]),int(epr[1]) + 1))
-        # list of all the pahe win pages in html
-        pahe_win_pages= [BeautifulSoup(requests.get(f"https://animepahe.com/play/{session_id}/{jsonpage_dict['data'][int(x)-1]['session']}").content,'lxml')for x in episodes_list]   
+    # A new format for list comprehension
+    pahe_win_pages = [
         
-    else:   
-        pahe_win_pages= [BeautifulSoup(requests.get(f"https://animepahe.com/play/{session_id}/{jsonpage_dict['data'][int(x)-1]['session']}").content,'lxml')for x in arg.split(',') ]
-
+    num
+    for segment in arg.split(",")
+    for num in (
+        range(int(segment.split("-")[0]), int(segment.split("-")[1]) + 1)
+        if "-" in segment
+        else [int(segment)]
+    )]
+    
     ddownlinks = [page.find_all('a',class_='dropdown-item',target="_blank",limit=3) for page in pahe_win_pages]
     # print(ddownlinks)
     
@@ -448,16 +447,15 @@ def multi_download_optimized(arg):
             
 def multi_download_verbose(eps: str):
     # given arg specifies '-' for range
-    if '-'in str(eps):
-        # parsing the eps to get individial eps
-        epr = list(x for x in eps.split('-'))
-
-        # list of the range of eps
-        episodes = list(range(int(epr[0]),int(epr[1]) + 1))
-        
-    else:
-        # classic eps separated by comma, stlink:=str(link)))]
-        episodes = [int(x) for x in eps.split(',')]
+    # New format for list comprehension  
+    episodes = [
+        num
+        for segment in eps.split(",")
+        for num in (
+            range(int(segment.split("-")[0]), int(segment.split("-")[1]) + 1)
+            if "-" in segment
+            else [int(segment)]
+        )]
     
     for ep in episodes:
         download(ep)
@@ -495,7 +493,6 @@ def interactive_main():
     4. i for more in -depth info on the options above 
     
     >> """)
-    
     print("\n")
     ep_to_download = (input("    Enter episode(s) to download >> "))
     

@@ -1,11 +1,15 @@
-arg = "13-17"
+arg = "6,7,13-17,1,3,4"
 
-# parsing the arg to get individial eps
-epr = list(x for x in arg.split('-'))
 
-# list of the range of eps
-episodes_list = list(range(int(epr[0]),int(epr[1]) + 1))
 
-print(episodes_list)
+result = [
+    num
+    for segment in arg.split(",")
+    for num in (
+        range(int(segment.split("-")[0]), int(segment.split("-")[1]) + 1)
+        if "-" in segment
+        else [int(segment)]
+    )
+]
 
-print(epr)
+print(result)

@@ -49,6 +49,13 @@ This is a Python script that can be used to search and download anime episodes f
   - In case of multiple options, each options must be seperated by a `,`
   - Example: `1, 3, 6-11` : downloads episodes 1,3,6,7,8,9,10,11
 
+## Images
+![Search Utility Example](imgs/img1_top.png)
+![other interaction](imgs/img2_middle.png)
+![Finished Downloads](imgs/img3_last.png)
+
+
+
 ## Command line features
 To use the script, run it in your terminal using the following command:
 

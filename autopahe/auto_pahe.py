@@ -458,9 +458,8 @@ def multi_download_verbose(eps):
             else [int(segment)]
         )]
     
-    for ep in episodes:
-        download(ep)
-        print(f"{animepicked} ep-{ep} downloading")
+    with concur.ThreadPoolExecutor() as executor:
+        executor.map(download, episodes)
 
     
 # ----------------------------------------------End of All the Argument Handling----------------------------------------------------------

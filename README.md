@@ -66,7 +66,6 @@ python auto_pahe.py [-h] [-b BROWSER] [-s SEARCH] [-sh SEARCH_HIDDEN] [-i INDEX]
 Here are the available options:
 
 - `-h`, `--help`: show the help message and exit
-- `-b`, `--browser`: choose the browser to use (`chrome`,`firefox` or `brave`). If omitted, the script will use `chrome` by default. Use `ffgui` for a GUI Firefox window.
 - `-s`, `--search`: search for an anime using a keyword. The script will display a list of matching results.
 - `-sh`, `--search_hidden`: search for an anime using its name and index. This option is less verbose than the regular search.
 - `-i`, `--index`: choose an anime from the search results by its index.

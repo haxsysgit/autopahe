@@ -4,7 +4,7 @@ import sys
 from json import loads,load,dump
 from re import search
 from bs4 import BeautifulSoup
-from .kwikdown import kwik_download
+from kwikdown import kwik_download
 import concurrent.futures as concur
 
 
@@ -48,24 +48,14 @@ class Banners():
             Searching for {anime}..
         ----------------------------------------
         ''')
-    def getting_eps(episode  = None):
-        print(f'''
-        ----------------------------------------
-            Getting episode {episode} links...
-        ----------------------------------------
-        ''')
-    def start_dl(eps = None):
-        print(f'''
-        ----------------------------------------
-            Starting Downloads for episode {eps}..
-        ----------------------------------------
-        ''')
+
     def downloading(anime = None,eps = None):
         print(f'''
         ----------------------------------------
             Downloading episode {eps} of {anime}..
         ----------------------------------------
         ''')
+        
     def select(anime,eps = None,year = None,
                atype = None,img = None,status = None):
         print(f'''
@@ -292,84 +282,11 @@ def download(arg = 1,barg:str = "firefox"):
     
     #getting the link to the kwik download page
     kwik = (pahe_soup:=BeautifulSoup(pahe_win,'lxml')).find('a', class_='redirect')['href']
-    down_url = kwik.replace("/f/","/d/")
-    
-    Banners.getting_eps(arg)
 
     Banners.downloading(animepicked,arg)
     
-    kwik_download(url=kwik,posturl=down_url,dpath="/home/haxsys/Downloads",ep=arg)
+    kwik_download(url=kwik,dpath="/home/haxsys/Downloads",ep=arg)
     
-    
-
-
-
-
-
-# def multi_download_verbose(arg):
-#     print("      To make efficient use of the multi download function,\nit is advised you have a very fast and stable internet connection")
-    
-    
-#     n()
-    
-#     # given arg specifies '-' for range
-#     if '-'in str(arg):
-#         # parsing the arg to get individial eps
-#         epr = list(x for x in arg.split('-'))
-
-#         # list of the range of eps
-#         episodes_list = list(range(int(epr[0]),int(epr[1]) + 1))
-        
-#     else:
-#         # classic arg separated by comma
-#         episodes_list = [int(x) for x in arg.split(',')]
-
-        
-#     for elem in episodes_list:
-                
-#         episode_session = jsonpage_dict['data'][elem]['session']
-            
-
-#         #stream page url format
-#         stream_page_url = f'https://animepahe.com/play/{session_id}/{episode_session}'
-#         n()
-        
-#         stream_page_soup = BeautifulSoup(requests.get(f'{stream_page_url}').content,'lxml')
-        
-#         dload = stream_page_soup.find_all('a',class_='dropdown-item',target="_blank")
-        
-#         from re import search
-
-
-#         # for link in dload:
-#         #     stlink = str(link)
-#         #     match = if not (search(r'(360p|1080p|eng)', stlink))
-#         #     if match:
-#         #         for link in stlink:
-#         #             soup = BeautifulSoup(link, 'html.parser')
-#         #             href = soup.a['href']
-#         #             print(href)
-        
-#         # i am sure u are not wise enough to know what is going on
-#         #but the code above was shortened to the code below
-#         #using walrus operator and list comprehension
-#         #and it return a list of chars which when combined will return the link
-#         linkpahe = [(BeautifulSoup(stlink, 'html.parser').a['href']) for link in dload if not (search(r'(360p|1080p|eng)', stlink:=str(link)))]
-        
-#         #the linkpahe variable carries a list of the characters of the link
-#         #so the pahewin variable will return the link webpage content
-#         pahe_win = requests.get(f'{[ch for ch in linkpahe][0]}').content
-        
-#         #getting the link to the kwik download page
-#         kwik = (BeautifulSoup(pahe_win,'lxml')).find('a', class_='redirect')['href']
-#         down_url = kwik.replace("/f/","/d/")
-
-#         Banners.getting_eps(arg)
-        
-#         Banners.downloading(animepicked,arg)
-
-#         kwik_download(url=kwik,posturl=down_url,dpath="/home/haxsys/Downloads")
-        
 
 
 
@@ -379,15 +296,18 @@ def multi_download_optimized(arg):
     arg = str(arg)
 
     # A new format for list comprehension
-    pahe_win_pages = [
-        
-    num
+
+    episodes = [
+    str(num)
     for segment in arg.split(",")
     for num in (
         range(int(segment.split("-")[0]), int(segment.split("-")[1]) + 1)
         if "-" in segment
         else [int(segment)]
     )]
+    
+    
+    pahe_win_pages= [BeautifulSoup(requests.get(f"https://animepahe.com/play/{session_id}/{jsonpage_dict['data'][int(x)-1]['session']}").content,'lxml')for x in episodes]
     
     ddownlinks = [page.find_all('a',class_='dropdown-item',target="_blank",limit=3) for page in pahe_win_pages]
     # print(ddownlinks)
@@ -410,8 +330,6 @@ def multi_download_optimized(arg):
     
     kwik_link = [(BeautifulSoup(requests.get(link).content,'lxml').find('a',class_ = "redirect"))['href'] for link in linkpahe ]    
     
-    Banners.getting_eps(arg)
-    
     Banners.downloading(animepicked,arg)
     # for i,url in enumerate(kwik_link):
     #     down_url = url.replace("/f/","/d/")
@@ -426,16 +344,10 @@ def multi_download_optimized(arg):
         futures = []
         
         for i,url in enumerate(kwik_link):
-            down_url = url.replace("/f/","/d/")
             ep = arg.split(",")[i]
-            future = executor.submit(kwik_download, url,down_url,dpath="/home/haxsys/Downloads",ep=ep)
-            n()
+            future = executor.submit(kwik_download, url,dpath="/home/haxsys/Downloads",ep=ep)
             n()
             futures.append(future)
-
-
-        # Wait for all tasks to complete
-        concur.wait(futures)
         # for future in futures:
         #     future.result()
         

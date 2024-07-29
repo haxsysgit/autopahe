@@ -23,12 +23,14 @@ This is a Python script that can be used to search and download anime episodes f
 - tqdm
 
 ## Getting Started
-1. Make sure you have Python and Firefox installed in your system
-2. Install PyPI package using `pip install autopahe`
-3. Wait for pip to install autopahe and all required dependencies. Enjoy the script :blush:
+1. Make sure you have Python installed in your system
+2. Install all dependencies using `pip install -r requirements.txt`
+3. Wait for pip to install all required dependencies. Enjoy the script :)
+4. Navigate to the project directory and Run `python3 autopahe/auto_pahe.py`
+
 ## Usage
-- Syntax: `autopahe -<optional arguments>`
-- To run the script, execute `autopahe`
+- Syntax: `auto_pahe.py -<optional arguments>`
+- To run the script, execute `python3 auto_pahe.py`
 
 <!-- ![autopahe](https://user-images.githubusercontent.com/56473062/120795797-922a3b80-c557-11eb-8328-26cfb39f4187.png) -->
 
@@ -38,6 +40,7 @@ This is a Python script that can be used to search and download anime episodes f
 - Select episodes to download.
 - Downloads are made using inbuilt-dlr (default).
 - Inbuilt-dlr finds and resumes incomplete downloads by default.
+
 - **Episode Selection Options:**
   <!-- - `0` : downloads all the episodes of the selected anime. -->
   - i : downloads episode i.
@@ -63,6 +66,7 @@ To use the script, run it in your terminal using the following command:
 python auto_pahe.py [-h] [-b BROWSER] [-s SEARCH] [-sh SEARCH_HIDDEN] [-i INDEX] [-sd SINGLE_DOWNLOAD] [-md MULTI_DOWNLOAD_OPTIMIZED] [-mdv MULTI_DOWNLOAD_VERBOSE] [-a ABOUT]
 ```
 
+
 Here are the available options:
 
 - `-h`, `--help`: show the help message and exit
@@ -71,7 +75,6 @@ Here are the available options:
 - `-i`, `--index`: choose an anime from the search results by its index.
 - `-sd`, `--single_download`: download a single episode of an anime by its number.
 - `-md`, `--multi_download_optimized`: download multiple episodes of an anime at once using a faster, optimized method. Specify a comma-separated string of episode numbers to download.
-- `-mdv`, `--multi_download_verbose`: download multiple episodes of an anime at once and show a verbose output. Specify a comma-separated string of episode numbers to download.
 - `-a`, `--about`: display an overview of the chosen anime.
   
 
@@ -79,12 +82,21 @@ Here are the available options:
 
 Here are some example commands to run the script:
 
-- Search for an anime: `python fetchanime.py --search "jujutsu kaisen"`
-- Choose an anime from the search results: `python fetchanime.py --search "jujutsu kaisen" --index 0`
-- Download a single episode: `python fetchanime.py --search "jujutsu kaisen" --single_download 1`
-- Download multiple episodes (optimized): `python fetchanime.py --search "jujutsu kaisen" --multi_download_optimized "1,2,3"`
-- Download multiple episodes (verbose): `python fetchanime.py --search "jujutsu kaisen" --multi_download_verbose "1,2,3"`
-- Get an overview of an anime: `python fetchanime.py --search "jujutsu kaisen" --index 0 --about`
+To search for an anime
+```shell
+# To search for an anime
+python3 auto_pahe.py -s "One piece"
+```
+To select an anime from the search result
+```shell
+# To select an anime from the search result
+python3 auto_pahe.py -s "One piece" -i 1
+```
+To download an episode in the selected anime
+```shell
+# To download an episode in the selected anime
+python3 auto_pahe.py -s "One piece" -i 0 -d 1
+```
 
 
 

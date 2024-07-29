@@ -404,11 +404,14 @@ def multi_download(eps):
         )]
     
     Banners.downloading(animepicked,eps)
+
     
     with concur.ThreadPoolExecutor() as executor:
         executor.map(download, episodes)
 
-    
+
+
+
 # ----------------------------------------------End of All the Argument Handling----------------------------------------------------------
 
 # To enable interaction with the program instead of command line argument    

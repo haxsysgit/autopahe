@@ -127,7 +127,7 @@ def kwik_download(url:str,browser: str = "firefox",dpath:str = os.getcwd(),chunk
         # Save the content to a file
 
         with open(filename, "wb") as file,tqdm.tqdm(
-            desc=f'ep {ep} of {animename}',
+            desc=f'Downloading Episode {ep}',
             total=total_size,
             unit='B',
             unit_scale=True,

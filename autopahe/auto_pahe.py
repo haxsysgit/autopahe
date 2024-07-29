@@ -5,11 +5,44 @@ from json import loads,load,dump
 from re import search
 from bs4 import BeautifulSoup
 from kwikdown import kwik_download
+from selenium import webdriver
+from selenium.webdriver.firefox.service import Service as chrome_service
+from selenium.webdriver.chrome.service import Service as ff_service
 import concurrent.futures as concur
 
 
 
 start = time.perf_counter()
+
+
+############################################ browser handling ##########################################################
+
+def browser(choice = "firefox"):
+
+    chrome_guess = ["chrome","Chrome","google chrome","google"]
+    ff_guess = ["ff","firefox","ffgui","ffox","fire"]
+
+    if choice.lower() in chrome_guess:
+        chserv = chrome_service("/snap/bin/geckodriver")
+
+        driver = webdriver.Chrome(service = chserv)
+        
+        
+    elif choice.lower() in ff_guess:
+        ffserv = ff_service("/snap/bin/geckodriver")
+        
+        options = webdriver.FirefoxOptions()
+        options.add_argument("--headless")
+        driver = webdriver.Firefox(service=ffserv,options=options)
+    else:
+        print(f"Sorry your browser is not supported :( ,\nfeel free to report the issue at https://github.com/haxsysgit/autopahe/issues")
+        return 0
+    
+    return driver
+
+
+###############################################################################################
+
 
 def data_report(data:dict,filepath = "autopahe_data.json",):
     if data:
@@ -25,6 +58,41 @@ def data_report(data:dict,filepath = "autopahe_data.json",):
             
         with open(filepath,"w") as st:
             dump(new_data,st)
+
+
+def driver_output(url:str,driver = False,content = False,json = False):
+
+    if driver == True : 
+
+        driver = browser()
+
+        driver.get(url)
+
+        driver.refresh()
+    
+    # Wait for the page to reload
+        driver.implicitly_wait(10)  # Adjust the timeout as needed
+    
+        if content:
+            # Get page source after reloading
+            page_source = driver.page_source
+            driver.quit()
+            return page_source
+        
+        elif json == True:
+            # Get the json response again after reloading
+            json_data = driver.execute_script("return document.body.textContent;")
+            driver.quit()
+            return json_data
+        
+    else:
+        print("Use the content( arg to get page_content or the json arg to get json response ")
+        exit()
+
+
+    
+
+        
 
 current_system_os = str(sys.platform) #get current os
 
@@ -131,29 +199,37 @@ def box_text(func):
 
 
 def lookup(arg):
-    # search banner
-    Banners.search(arg)
-    n()
-    # url pattern requested when anime is searched
-    animepahe_search_pattern = f'https://animepahe.com/api?m=search&q={arg}'
 
     global search_response_dict
 
-    search_response = requests.get(animepahe_search_pattern).text
-    
-        #return if no anime found
+    # Search banner
+
+    Banners.search(arg)
+    n()
+
+    # url pattern requested when anime is searched
+    animepahe_search_pattern = f'https://animepahe.ru/api?m=search&q={arg}'
+
+    search_response = driver_output(animepahe_search_pattern,driver=True,json=True)
+
+    # print(search_response)
+
+    #return if no anime found
     if not search_response:
         Banners.header()
         print("No matching anime found. Retry!")
         return
-    
+
+
     # converting response json data to python dictionary for operation
     search_response_dict = loads(search_response)
     # all animepahe has a session url and the url will be https://animepahe.com/anime/[then the session id]
 
+
+
     resultlen = len(search_response_dict['data'])
 
-    print(f'{resultlen} results were found and are as follows --> ')
+    print(f'{resultlen} results were found  ---> ')
 
     n()
 
@@ -164,7 +240,8 @@ def lookup(arg):
 
         status = search_response_dict['data'][el]['status']
 
-        session = search_response_dict['data'][el]['session']
+        year = search_response_dict['data'][el]['year']
+
         
 
         print(f'''
@@ -172,11 +249,15 @@ def lookup(arg):
         ---------------------------------------------------------
                 Number of episodes contained : {episodenum}
                 Current status of the anime : {status}
-                session id of the anime : {session}
+                Year the anime aired : {year}
         ''')
 
     n()
     n()
+
+    return search_response_dict
+
+
 
 def search_hidden(arg):
     # search banner
@@ -184,8 +265,6 @@ def search_hidden(arg):
     n()
     # url pattern requested when anime is searched
     animepahe_search_pattern = f'https://animepahe.com/api?m=search&q={arg}'
-
-    global search_response_dict
     
     # converting response json data to python dictionary for operation
     search_response_dict = loads(requests.get(animepahe_search_pattern).text)
@@ -194,18 +273,16 @@ def search_hidden(arg):
 
 
 
-# =========================================== handling the single download utility ========================
-
+# =========================================== handling the single download utility ============================
     
-
-
-        
 
 def index(arg):
 
     n()
+
     global jsonpage_dict,episto,session_id,animepicked,episode_page_format
-    
+
+
     animepicked = search_response_dict['data'][arg]['title']
     
     #session id of the whole session with the anime
@@ -218,7 +295,7 @@ def index(arg):
     # now the anime_json_data url format
     anime_url_format = f'https://animepahe.com/api?m=release&id={session_id}&sort=episode_asc&page=1'
     
-    jsonpage_dict = loads(requests.get(anime_url_format).text)
+    jsonpage_dict = loads(driver_output(anime_url_format,driver=True,json=True))
     
     episto = jsonpage_dict['total']
     year = search_response_dict['data'][arg]['year']
@@ -236,14 +313,16 @@ def index(arg):
 
 def about():
         #extract the anime info from a div with class anime-synopsis
-        soup = BeautifulSoup((requests.get(episode_page_format).text),'lxml')
+        ep_page = driver_output(episode_page_format,driver=True,content=True)
+        soup = BeautifulSoup(ep_page,'lxml')
         abt = soup.select('.anime-synopsis')
         return abt[0].text.strip()
 
 
-def download(arg = 1,barg:str = "firefox"):
+def download(arg = 1):
     # using return value of the search function to get the page
     # using the json data from the page url to get page where the episodes to watch are
+
     arg = int(arg)
     print()
 
@@ -254,10 +333,15 @@ def download(arg = 1,barg:str = "firefox"):
     stream_page_url = f'https://animepahe.com/play/{session_id}/{episode_session}'
     n()
     
-    stream_page_soup = BeautifulSoup(requests.get(f'{stream_page_url}').content,'lxml')
+    # get steampage 
+    driver = browser()
+    driver.get(stream_page_url)
+
+    time.sleep(15)
+    stream_page_soup = BeautifulSoup(driver.page_source,'lxml')
     
     dload = stream_page_soup.find_all('a',class_='dropdown-item',target="_blank")
-    
+
     from re import search
 
 
@@ -274,90 +358,39 @@ def download(arg = 1,barg:str = "firefox"):
     #but the code above was shortened to the code below
     #using walrus operator and list comprehension
     #and it return a list of chars which when combined will return the link
+
     linkpahe = [(href:=BeautifulSoup(stlink, 'html.parser').a['href']) for link in dload if not (search(r'(360p|1080p|eng)', stlink:=str(link)))]
     
     #the linkpahe variable carries a list of the characters of the link
     #so the pahewin variable will return the link webpage content
-    pahe_win = requests.get(f'{[ch for ch in linkpahe][0]}').content
-    
+     
+    # print(linkpahe)
+    # print(stream_page_soup)
+    driver.get(f"{linkpahe[0]}")
+    # driver.implicitly_wait(10)
+    time.sleep(10)
+    kwik_page = driver.page_source
+    driver.quit()
+
     #getting the link to the kwik download page
-    kwik = (pahe_soup:=BeautifulSoup(pahe_win,'lxml')).find('a', class_='redirect')['href']
 
+    kwik_cx=BeautifulSoup(kwik_page,'lxml')
+
+    # print(kwik_cx)
+
+    #getting kwik.cx f download link
+    kwik = kwik_cx.find('a', class_='redirect')['href']
+
+    # print(f"Download link => {kwik}")
     Banners.downloading(animepicked,arg)
-    
-    kwik_download(url=kwik,dpath="/home/haxsys/Downloads",ep=arg)
-    
+
+    kwik_download(url=kwik,dpath="/home/haxsys/Downloads",ep=arg,animename = animepicked)
 
 
 
-# This function unlike the one above downloads (if there is stable and fast connection) anime concurrently 
-def multi_download_optimized(arg):
-    
-    arg = str(arg)
-
-    # A new format for list comprehension
-
-    episodes = [
-    str(num)
-    for segment in arg.split(",")
-    for num in (
-        range(int(segment.split("-")[0]), int(segment.split("-")[1]) + 1)
-        if "-" in segment
-        else [int(segment)]
-    )]
-    
-    
-    pahe_win_pages= [BeautifulSoup(requests.get(f"https://animepahe.com/play/{session_id}/{jsonpage_dict['data'][int(x)-1]['session']}").content,'lxml')for x in episodes]
-    
-    ddownlinks = [page.find_all('a',class_='dropdown-item',target="_blank",limit=3) for page in pahe_win_pages]
-    # print(ddownlinks)
-    
-    n()
-    
-    
-    # for link in ddownlinks:
-    #     for url in link:
-    #         if not (search(r'(360p|1080p|eng)', str(url))):
-    #             soup = BeautifulSoup(str(url),'lxml')
-
-    #             href=soup.a['href']
-    #             print(href)
-    #             n()
-
-    # n()
-    
-    linkpahe =[BeautifulSoup(str(url),'lxml').a['href'] for link in ddownlinks for url in link if not (search(r'(360p|1080p|eng)', str(url)))]
-    
-    kwik_link = [(BeautifulSoup(requests.get(link).content,'lxml').find('a',class_ = "redirect"))['href'] for link in linkpahe ]    
-    
-    Banners.downloading(animepicked,arg)
-    # for i,url in enumerate(kwik_link):
-    #     down_url = url.replace("/f/","/d/")
-        
-    #     ep = arg.split(",")[i]
-        
-    #     Banners.downloading(animepicked,ep)
-        
-    #     kwik_download(url,down_url,dpath="/home/haxsys/Downloads")
-        
-    with concur.ThreadPoolExecutor(max_workers=len(kwik_link)) as executor:
-        futures = []
-        
-        for i,url in enumerate(kwik_link):
-            ep = arg.split(",")[i]
-            future = executor.submit(kwik_download, url,dpath="/home/haxsys/Downloads",ep=ep)
-            n()
-            futures.append(future)
-        # for future in futures:
-        #     future.result()
-        
-        
-
-
-    
 
             
-def multi_download_verbose(eps):
+def multi_download(eps):
     eps = str(eps)
     # given arg specifies '-' for range
     # New format for list comprehension  
@@ -370,17 +403,24 @@ def multi_download_verbose(eps):
             else [int(segment)]
         )]
     
+    Banners.downloading(animepicked,eps)
+
+    
     with concur.ThreadPoolExecutor() as executor:
         executor.map(download, episodes)
 
-    
+
+
+
 # ----------------------------------------------End of All the Argument Handling----------------------------------------------------------
 
 # To enable interaction with the program instead of command line argument    
 def interactive_main():
-    
+    # Selecting browser of choice
+    choice = str(input("Enter your favorite browser [e.g chrome] >> "))
+
     # Search prompt for search function
-    lookup_anime = str(input("Search an anime [e.g 'one piece'] >> "))
+    lookup_anime = str(input("\nSearch an anime [e.g 'one piece'] >> "))
 
     # searching anime with the lookup function
     lookup(lookup_anime)
@@ -410,16 +450,13 @@ def interactive_main():
     
     switch = {
         "1":download,
-        "2":multi_download_optimized,
-        "3":multi_download_verbose,
+        "2":multi_download,
         "4":info,
         's':download,
-        'md':multi_download_optimized,
-        'v':multi_download_verbose,
+        'md':multi_download,
         'i':info,
         'single_download':download,
-        'multi_download':multi_download_optimized,
-        'md_verbose':multi_download_verbose,
+        'multi_download':multi_download,
         'info':info
     }
     
@@ -443,10 +480,17 @@ def command_main(args):
     sharg = args.search_hidden
     iarg = args.index
     sdarg = args.single_download
-    mdarg = args.multi_download_optimized
-    mdvarg = args.multi_download_verbose
+    mdarg = args.multi_download
     abtarg = args.about
     
+
+    # init browser
+    if barg:
+        browser(barg)
+    else:
+        pass
+
+
     # search function
     if sarg != None:
         lookup(sarg)
@@ -482,13 +526,10 @@ def command_main(args):
     else:
         pass
     
-    # Multi_download function(s)
-        
-    if mdvarg:
-        multi_download_verbose(mdvarg)
+    # Multi_download function
         
     if mdarg:
-        multi_download_optimized(mdarg)
+        multi_download(mdarg)
     
 
         
@@ -516,11 +557,8 @@ def main():
     parser.add_argument('-d', '--single_download', type=int,
                         help='Used to download a single episode of an anime')
 
-    parser.add_argument('-md', '--multi_download_optimized',
+    parser.add_argument('-md', '--multi_download',
                         help='Used to download multiple episodes of an anime concurrently,a string of ints separated by commas[FASTER]')
-
-    parser.add_argument('-mdc', '--multi_download_verbose',
-                        help='[SLOW]Used to download multiple episodes of an anime and show verbose,a string of ints separated by commas,simply uses SD in a loop')
 
     parser.add_argument('-a', '--about',
                         help='Outputs an overview information on the anime',action='store_true')
@@ -552,6 +590,6 @@ n()
 
 finish = time.perf_counter()
 
-print(f'Finish time is {round(finish-start,2)}\n')
+print(f'Finish time is {round(finish-start/60,2)}\n')
 
 

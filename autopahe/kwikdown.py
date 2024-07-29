@@ -5,17 +5,12 @@ import requests,os,tqdm,time
 from selenium import webdriver
 from selenium.webdriver.firefox.service import Service as chrome_service
 from selenium.webdriver.chrome.service import Service as ff_service
-from concurrent.futures import ThreadPoolExecutor
 from bs4 import BeautifulSoup
 
     
-    
-    
 
 
-
-
-def kwik_download(url:str,browser: str = "firefox",dpath:str = os.getcwd(),chunk_size: int = 10 * 1024,ep=None):
+def kwik_download(url:str,browser: str = "firefox",dpath:str = os.getcwd(),chunk_size: int = 10 * 1024,ep=None,animename = None):
     # changing to specified path
     os.chdir(dpath)
 
@@ -38,7 +33,7 @@ def kwik_download(url:str,browser: str = "firefox",dpath:str = os.getcwd(),chunk
         ffserv = ff_service("/snap/bin/geckodriver")
         
         options = webdriver.FirefoxOptions()
-        options.headless = True
+        options.add_argument("-headless")
         
         driver = webdriver.Firefox(service=ffserv,options=options)
     else:
@@ -58,15 +53,16 @@ def kwik_download(url:str,browser: str = "firefox",dpath:str = os.getcwd(),chunk
     
     # Find the hidden input element within the form and Extract the value attribute of the hidden input
     token = form.find("input", attrs={"type": "hidden"})['value']
-    
+    # print(f"\n{token}")
     # Navigate to the desired page
     driver.get(posturl)
 
     # Get the cookies
     cookies = driver.get_cookies()
-
+    # print(f"\n\n{cookies}")
     # Combine cookies into a single string
     cookie_string = ';'.join([cookie['name'] + '=' + cookie['value'] for cookie in cookies])
+    # print(f"\n\n{cookie_string}")
 
     # Quit the driver
     driver.quit()
@@ -74,16 +70,16 @@ def kwik_download(url:str,browser: str = "firefox",dpath:str = os.getcwd(),chunk
     # request handlin
     params = {"_token":token}
     preheaders = {
-        'Host': 'kwik.cx',
-        'User-Agent': 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/113.0',
+        'Host': 'kwik.si',
+        'User-Agent': 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5',
         'Accept-Encoding': 'gzip, deflate, br',
         'Referer': url,
         'Content-Type': 'application/x-www-form-urlencoded',
         'Content-Length': '47',
-        'Origin': 'https://kwik.cx',
-        'Alt-Used': 'kwik.cx',
+        'Origin': 'https://kwik.si',
+        'Alt-Used': 'kwik.si',
         'Connection': 'keep-alive',
         'Cookie': cookie_string,
         'Upgrade-Insecure-Requests': '1',
@@ -91,6 +87,7 @@ def kwik_download(url:str,browser: str = "firefox",dpath:str = os.getcwd(),chunk
         'Sec-Fetch-Mode': 'navigate',
         'Sec-Fetch-Site': 'same-origin',
         'Sec-Fetch-User': '?1',
+        'Priority': 'u=0, i',
         'TE': 'trailers'
     }
 
@@ -128,8 +125,9 @@ def kwik_download(url:str,browser: str = "firefox",dpath:str = os.getcwd(),chunk
     
     if response.status_code == 200:
         # Save the content to a file
+
         with open(filename, "wb") as file,tqdm.tqdm(
-            desc=f'Downloading ep {ep}',
+            desc=f'Downloading Episode {ep}',
             total=total_size,
             unit='B',
             unit_scale=True,
@@ -157,6 +155,7 @@ def kwik_download(url:str,browser: str = "firefox",dpath:str = os.getcwd(),chunk
                 progress_bar.update(len(chunk))
 
     else:
+
         print("Failed to download the MP4 file.\n")
         print(f"return code : {response.status_code}")
         

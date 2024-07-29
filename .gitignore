@@ -1,6 +1,7 @@
 animepahe
 AnimePahe.py
 __pycache__
+__init__.py
 *.log
 
 # Distribution / packaging

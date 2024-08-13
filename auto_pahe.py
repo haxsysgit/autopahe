@@ -1,44 +1,64 @@
 #! /usr/bin/python3
 import time,requests,argparse,os
 import sys
-from json import loads,load,dump
+import logging
+from json import loads,load,dump,dumps
 from re import search
 from bs4 import BeautifulSoup
 from kwikdown import kwik_download
+from manager import process_record,load_database,print_all_records,search_record
 from selenium import webdriver
 from selenium.webdriver.firefox.service import Service as chrome_service
 from selenium.webdriver.chrome.service import Service as ff_service
 import concurrent.futures as concur
 
+########################################### LOGGING ################################################
 
+logging.basicConfig(
+    level=logging.INFO,  # Set the minimum log level
+    format='%(asctime)s - %(levelname)s - %(message)s',  # Log message format
+    handlers=[
+        logging.StreamHandler(),  # Output to console
+        logging.FileHandler('autopahe.log')  # Output to a file
+    ]
+)
 
 start = time.perf_counter()
+
+#Record list
+
+records = []
 
 
 ############################################ browser handling ##########################################################
 
-def browser(choice = "firefox"):
+def browser(choice="firefox"):
+    chrome_guess = ["chrome", "Chrome", "google chrome", "google"]
 
-    chrome_guess = ["chrome","Chrome","google chrome","google"]
-    ff_guess = ["ff","firefox","ffgui","ffox","fire"]
+    ff_guess = ["ff", "firefox", "ffgui", "ffox", "fire"]
 
     if choice.lower() in chrome_guess:
         chserv = chrome_service("/snap/bin/geckodriver")
+        
+        driver = webdriver.Chrome(service=chserv)
 
-        driver = webdriver.Chrome(service = chserv)
-        
-        
+        logging.info("Using Chrome browser")
+
     elif choice.lower() in ff_guess:
         ffserv = ff_service("/snap/bin/geckodriver")
-        
+
         options = webdriver.FirefoxOptions()
         options.add_argument("--headless")
-        driver = webdriver.Firefox(service=ffserv,options=options)
+        driver = webdriver.Firefox(service=ffserv, options=options)
+
+        logging.info("Using Firefox browser in headless mode")
+
     else:
-        print(f"Sorry your browser is not supported :( ,\nfeel free to report the issue at https://github.com/haxsysgit/autopahe/issues")
+        logging.error("Unsupported browser choice")
         return 0
-    
+
     return driver
+
 
 
 ###############################################################################################
@@ -57,7 +77,7 @@ def data_report(data:dict,filepath = "autopahe_data.json",):
         new_data = {**existing_data,**data}
             
         with open(filepath,"w") as st:
-            dump(new_data,st)
+            dump(new_data,st,indent=4)
 
 
 def driver_output(url:str,driver = False,content = False,json = False):
@@ -86,6 +106,7 @@ def driver_output(url:str,driver = False,content = False,json = False):
             return json_data
         
     else:
+        logging.error("Invalid arguments for driver_output")
         print("Use the content( arg to get page_content or the json arg to get json response ")
         exit()
 
@@ -167,17 +188,6 @@ def n():
 
 
 n()
-n()
-
-
-
-
-
-
-
-
-
-
 
 # ============================ The requests argument handler function===============================
 
@@ -217,7 +227,7 @@ def lookup(arg):
     #return if no anime found
     if not search_response:
         Banners.header()
-        print("No matching anime found. Retry!")
+        logging.info("No matching anime found. Retry!")
         return
 
 
@@ -228,7 +238,7 @@ def lookup(arg):
 
 
     resultlen = len(search_response_dict['data'])
-
+    n()
     print(f'{resultlen} results were found  ---> ')
 
     n()
@@ -252,7 +262,6 @@ def lookup(arg):
                 Year the anime aired : {year}
         ''')
 
-    n()
     n()
 
     return search_response_dict
@@ -280,7 +289,7 @@ def index(arg):
 
     n()
 
-    global jsonpage_dict,episto,session_id,animepicked,episode_page_format
+    global jsonpage_dict,session_id,animepicked,episode_page_format
 
 
     animepicked = search_response_dict['data'][arg]['title']
@@ -316,6 +325,7 @@ def about():
         ep_page = driver_output(episode_page_format,driver=True,content=True)
         soup = BeautifulSoup(ep_page,'lxml')
         abt = soup.select('.anime-synopsis')
+
         return abt[0].text.strip()
 
 
@@ -324,14 +334,14 @@ def download(arg = 1):
     # using the json data from the page url to get page where the episodes to watch are
 
     arg = int(arg)
-    print()
+
 
     #session string of the stream episode
     episode_session = jsonpage_dict['data'][arg-1]['session']
     
     #stream page url format
     stream_page_url = f'https://animepahe.com/play/{session_id}/{episode_session}'
-    n()
+
     
     # get steampage 
     driver = browser()
@@ -383,8 +393,8 @@ def download(arg = 1):
 
     # print(f"Download link => {kwik}")
     Banners.downloading(animepicked,arg)
-
-    kwik_download(url=kwik,dpath="/home/haxsys/Downloads",ep=arg,animename = animepicked)
+    output_path="/home/haxsys/Downloads"
+    kwik_download(url=kwik,dpath=output_path,ep=arg,animename = animepicked)
 
 
 
@@ -482,7 +492,7 @@ def command_main(args):
     sdarg = args.single_download
     mdarg = args.multi_download
     abtarg = args.about
-    
+    rarg = args.record
 
     # init browser
     if barg:
@@ -490,88 +500,82 @@ def command_main(args):
     else:
         pass
 
-
-    # search function
-    if sarg != None:
+    # Search function
+    if sarg:
+        records.append(sarg)
         lookup(sarg)
-    elif type(sarg) == float:
-        print("The search argument does not accept a float value")
-    else:
-        pass
-
-    if bool(sharg) == True:
-        search_hidden(sharg)
-    elif type(sarg) == float:
-        print("The search argument does not accept a float value")
-    else:
-        pass
+    elif isinstance(sarg, float):
+        logging.warning("The search argument does not accept a float value")
     
-    # index function
-    if iarg != None:
+    if sharg:
+        search_hidden(sharg)
+    
+    # Index function
+    if iarg is not None:
+        records.append(search_response_dict['data'][iarg])
+        process_record(records)
         index(iarg)
-    else:
-        pass
     
     # About function
-    
     if abtarg:
         info = about()
-        Banners.anime_info(animepicked,info)
-    else:
-        pass
+        records.append(info)
+        process_record(records,update=True)
+        Banners.anime_info(animepicked, info)
     
-    # Single_Download function
-    if sdarg != None:
+    # Single Download function
+    if sdarg:
+        records.append(sdarg)
+        process_record(records,update=True)
         download(sdarg)
-    else:
-        pass
     
-    # Multi_download function
-        
+    # Multi Download function
     if mdarg:
+        records.append(mdarg)
+        process_record(records,update=True)
         multi_download(mdarg)
     
+    # Record argument
+    if rarg:
+        if rarg == "view":
+            print_all_records()
 
-        
+        elif rarg.isdigit():
+            position = int(rarg)
+            database = load_database()
+
+            if str(position) in database:
+                print(dumps(database[str(position)], indent=4))
+
+            else:
+                logging.info(f"No record found at position {position}")
+
+        else:
+            results = search_record(rarg)
+            if results:
+                print(dumps(results, indent=4))
+            else:
+                print("No matching records found.")
+
+                
 
 def main():
-    # ===================================== Handling Arguments and other involved function============================================
     parser = argparse.ArgumentParser()
 
-    # Adding all the required arguments
-
-    parser.add_argument(
-        '-b', '--browser', help='To select the dglobalesired requests either chrome or firefox. default is chrome')
-
-    parser.add_argument(
-        '-s', '--search',type=str, 
-        help='Specify the search keyword or Anime name e.g jujutsu kaisen.it returns a match of available anime related to the search word')
-
-    parser.add_argument(
-        '-sh', '--search_hidden', help='Less Verbose search function,should be used only the anime and index is known')
-
-    parser.add_argument('-i', '--index', type=int,
-                        help='Specify the index of the desired anime from the search results')
-
-
-    parser.add_argument('-d', '--single_download', type=int,
-                        help='Used to download a single episode of an anime')
-
-    parser.add_argument('-md', '--multi_download',
-                        help='Used to download multiple episodes of an anime concurrently,a string of ints separated by commas[FASTER]')
-
-    parser.add_argument('-a', '--about',
-                        help='Outputs an overview information on the anime',action='store_true')
-
-
+    parser.add_argument('-b', '--browser', help='Select the desired browser (chrome or firefox). Default is chrome.')
+    parser.add_argument('-s', '--search', type=str, help='Search for an anime by name.')
+    parser.add_argument('-sh', '--search_hidden', help='Less verbose search function.')
+    parser.add_argument('-i', '--index', type=int, help='Specify the index of the desired anime from the search results.')
+    parser.add_argument('-d', '--single_download', type=int, help='Download a single episode of an anime.')
+    parser.add_argument('-md', '--multi_download', help='Download multiple episodes of an anime.')
+    parser.add_argument('-a', '--about', help='Output an overview of the anime.', action='store_true')
+    parser.add_argument('-r', '--record', help='Interact with the records/database (view, [index], [keyword]).')
 
     args = parser.parse_args()
     
     if any(vars(args).values()):
-        # Command line arguments are present
         command_main(args)
     else:
-        # No command line arguments, run interactive mode
         interactive_main()
 
 
@@ -580,8 +584,8 @@ def main():
 
 
 if __name__ == '__main__':
-    # INTRO BANNER
     main()
+
 else:
     Banners.header()
     
@@ -590,6 +594,6 @@ n()
 
 finish = time.perf_counter()
 
-print(f'Finish time is {round(finish-start/60,2)}\n')
+logging.info(f'Finish time is {round(finish-start/60,2)}\n')
 
 

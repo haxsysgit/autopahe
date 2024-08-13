@@ -1,8 +1,12 @@
 animepahe
 AnimePahe.py
-__pycache__
-__init__.py
+./__pycache__
+./__init__.py
 *.log
+*.json
+*.json
+*.in
+*.toml
 
 # Distribution / packaging
 .Python

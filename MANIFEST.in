@@ -1,3 +1,0 @@
-include *.in
-include *.txt
-recursive-include autopahe *.py

@@ -37,9 +37,11 @@ def update_entry(record, database=None):
     """
     Update an existing record in the database.
     """
+
     if database is None:
         database = load_database()  # Load the current database only if not passed as an argument
     
+
     keyword = record[0]
     title = record[1].get('title')
     
@@ -57,17 +59,56 @@ def update_entry(record, database=None):
     year = record[1].get('year')
     cover = record[1].get('poster')
     
-    about = record[2] if len(record) > 2 else ""
-    current_episode_info = record[3] if len(record) > 3 else 0
-    current_episode = int(current_episode_info.split(',')[-1]) if isinstance(current_episode_info, str) else int(current_episode_info)
+    changes = []  
+
+    for k,v in database.items():
+        if database[k]['keyword'] == keyword :
+            changes.append(database[k]['about'])
+            # print(changes)
+            changes.append(database[k]['current_episode'])
+            # print(changes)     
+
+
     
+    about = changes[1]
+    current_episode = changes[0]
+    # print(f'Current_episode : {current_episode}')
+
+
+    # print(f'Current_episode : {current_episode}')
+    
+    
+    # Handle the different possible lengths of the record input
+    if len(record) == 3:
+        # Check if the third item is the 'about' field or the 'current_episode' information
+        if ',' in record[2] and len(record[2]) < 30:
+            current_episode = int(record[2].split(',')[-1])  # Treat it as episode info
+            # print(f'Current_episode : {current_episode}')
+
+        else:
+            about = record[2]  # Treat it as 'about'
+
+    elif len(record) == 4:
+        about = record[2]  # Third element is the 'about' description
+        current_episode_info = record[3]
+        current_episode = int(current_episode_info.split(',')[-1]) if isinstance(current_episode_info, str) and all(part.isdigit() for part in current_episode_info.split(',')) else int(current_episode_info)
+
+    
+
     # Determine the status based on the current episode
     status = "Not Started Watching"
-    if current_episode > 0:
-        if current_episode < max_episode:
-            status = f"Watching Episode {current_episode}"
-        else:
-            status = "Completed"
+
+    try:
+        if current_episode > 0:
+            if current_episode < max_episode:
+                status = f"Watching Episode {current_episode}"
+            else:
+                status = "Completed"
+    except TypeError:
+        print(f"\n{current_episode} is currently str,'>' not supported between instances of 'str' and 'int'")
+        pass
+
+    
     
     # Update the existing record with new details
     database[existing_index] = {
@@ -89,16 +130,29 @@ def add_new_record(record, database):
     Add a new record to the database.
     """
     next_index = get_next_index(database)
-        
+    
     # Extract record details
     anime_type = record[1].get('type')
     max_episode = record[1].get('episodes')
     year = record[1].get('year')
     cover = record[1].get('poster')
+
+    # Identify and extract the 'about' and 'current_episode' fields
+    about = ""
+    current_episode = 0
+
+    # Handle the different possible lengths of the record input
+    if len(record) == 3:
+        # Check if the third item is the 'about' field or the 'current_episode' information
+        if ',' in record[2] and all(part.isdigit() for part in record[2].split(',')):
+            current_episode = int(record[2].split(',')[-1])  # Treat it as episode info
+        else:
+            about = record[2]  # Treat it as 'about'
+    elif len(record) == 4:
+        about = record[2]  # Third element is the 'about' description
+        current_episode_info = record[3]
+        current_episode = int(current_episode_info.split(',')[-1]) if isinstance(current_episode_info, str) and all(part.isdigit() for part in current_episode_info.split(',')) else int(current_episode_info)
     
-    about = record[2] if len(record) > 2 else ""
-    current_episode_info = record[3] if len(record) > 3 else 0
-    current_episode = int(current_episode_info.split(',')[-1]) if isinstance(current_episode_info, str) else int(current_episode_info)
     
     # Determine the status based on the current episode
     status = "Not Started Watching"
@@ -107,7 +161,7 @@ def add_new_record(record, database):
             status = f"Watching Episode {current_episode}"
         else:
             status = "Completed"
-    
+
     # Add the new record to the database
     database[next_index] = {
         "title": record[1].get('title'),
@@ -185,8 +239,8 @@ sample = [
         'poster': 'https://i.animepahe.ru/posters/3c01c83a35626201293b677d166226fcef7e13b00b875991907f1a54aebad626.jpg',
         'session': 'fccced41-eb03-ea7c-ceaf-13b40bad9cd3'
     },
-    'The world is in the midst of the industrial revolution when horrific creatures emerge from a mysterious virus, ripping through the flesh of humans to sate their never-ending appetite. The only way to kill these beings, known as "Kabane," is by destroying their steel-coated hearts. However, if bitten by one of these monsters, the victim is doomed to a fate worse than death, as the fallen rise once more to join the ranks of their fellow undead.Only the most fortified of civilizations have survived this turmoil, as is the case with the island of Hinomoto, where mankind has created a massive wall to protect themselves from the endless hordes of Kabane. The only way into these giant fortresses is via heavily-armored trains, which are serviced and built by young men such as Ikoma. Having created a deadly weapon that he believes will easily pierce through the hearts of Kabane, Ikoma eagerly awaits the day when he will be able to fight using his new invention. Little does he know, however, that his chance will come much sooner than he expected...',
-    '1,2,3,4'
+'The world is in the midst of the industrial revolution when horrific creatures emerge from a mysterious virus, ripping through the flesh of humans to sate their never-ending appetite. The only way to kill these beings, known as "Kabane," is by destroying their steel-coated hearts. However, if bitten by one of these monsters, the victim is doomed to a fate worse than death, as the fallen rise once more to join the ranks of their fellow undead.Only the most fortified of civilizations have survived this turmoil, as is the case with the island of Hinomoto, where mankind has created a massive wall to protect themselves from the endless hordes of Kabane. The only way into these giant fortresses is via heavily-armored trains, which are serviced and built by young men such as Ikoma. Having created a deadly weapon that he believes will easily pierce through the hearts of Kabane, Ikoma eagerly awaits the day when he will be able to fight using his new invention. Little does he know, however, that his chance will come much sooner than he expected...',
+
 ]
 
 if __name__ == '__main__':

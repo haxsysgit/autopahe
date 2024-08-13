@@ -238,7 +238,7 @@ def lookup(arg):
 
 
     resultlen = len(search_response_dict['data'])
-
+    n()
     print(f'{resultlen} results were found  ---> ')
 
     n()
@@ -393,7 +393,7 @@ def download(arg = 1):
 
     # print(f"Download link => {kwik}")
     Banners.downloading(animepicked,arg)
-    output_path="/home/haxsys/Downloads",
+    output_path="/home/haxsys/Downloads"
     kwik_download(url=kwik,dpath=output_path,ep=arg,animename = animepicked)
 
 

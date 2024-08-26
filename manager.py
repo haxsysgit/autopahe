@@ -82,7 +82,8 @@ def update_entry(record, database=None):
     if len(record) == 3:
         # Check if the third item is the 'about' field or the 'current_episode' information
         if ',' in record[2] and len(record[2]) < 30:
-            current_episode = int(record[2].split(',')[-1])  # Treat it as episode info
+            latest_ep = int(record[2].split(',')[-1])  # Treat it as episode info
+            current_episode = latest_ep if current_episode < latest_ep else current_episode
             # print(f'Current_episode : {current_episode}')
 
         else:
@@ -91,7 +92,9 @@ def update_entry(record, database=None):
     elif len(record) == 4:
         about = record[2]  # Third element is the 'about' description
         current_episode_info = record[3]
-        current_episode = int(current_episode_info.split(',')[-1]) if isinstance(current_episode_info, str) and all(part.isdigit() for part in current_episode_info.split(',')) else int(current_episode_info)
+        latest_episode = int(current_episode_info.split(',')[-1]) if isinstance(current_episode_info, str) and all(part.isdigit() for part in current_episode_info.split(',')) else int(current_episode_info)
+        current_episode = latest_episode if current_episode < latest_episode else current_episode
+        
 
     
 

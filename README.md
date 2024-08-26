@@ -76,6 +76,7 @@ Here are the available options:
 - `-sd`, `--single_download`: download a single episode of an anime by its number.
 - `-md`, `--multi_download_optimized`: download multiple episodes of an anime at once using a faster, optimized method. Specify a comma-separated string of episode numbers to download.
 - `-a`, `--about`: display an overview of the chosen anime.
+- `-r`, `--record`:Interact with the records/database (view, [index], [keyword]).
   
 
 ## Example Usage

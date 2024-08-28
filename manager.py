@@ -59,8 +59,7 @@ def update_entry(record, database=None):
     year = record[1].get('year')
     cover = record[1].get('poster')
     
-    changes = []  
-
+    changes = []
     for k,v in database.items():
         if database[k]['keyword'] == keyword :
             changes.append(database[k]['about'])
@@ -70,10 +69,17 @@ def update_entry(record, database=None):
 
 
     
-    about = changes[1]
-    current_episode = changes[0]
+    about = changes[0]
+    # print(about)
+    current_episode = changes[1]
+
+
+    if isinstance(current_episode,str):
+        current_episode = 0
+
     # print(f'Current_episode : {current_episode}')
 
+    # print(about)
 
     # print(f'Current_episode : {current_episode}')
     
@@ -82,8 +88,8 @@ def update_entry(record, database=None):
     if len(record) == 3:
         # Check if the third item is the 'about' field or the 'current_episode' information
         if ',' in record[2] and len(record[2]) < 30:
-            latest_ep = int(record[2].split(',')[-1])  # Treat it as episode info
-            current_episode = latest_ep if current_episode < latest_ep else current_episode
+            latest_episode = max(list(int(s) for s in record[2].split(',')))
+            current_episode = latest_episode if current_episode < latest_episode else current_episode
             # print(f'Current_episode : {current_episode}')
 
         else:
@@ -92,8 +98,11 @@ def update_entry(record, database=None):
     elif len(record) == 4:
         about = record[2]  # Third element is the 'about' description
         current_episode_info = record[3]
-        latest_episode = int(current_episode_info.split(',')[-1]) if isinstance(current_episode_info, str) and all(part.isdigit() for part in current_episode_info.split(',')) else int(current_episode_info)
+
+        latest_episode = max(list(int(s) for s in current_episode_info.split(',')))
         current_episode = latest_episode if current_episode < latest_episode else current_episode
+
+        
         
 
     
@@ -126,6 +135,7 @@ def update_entry(record, database=None):
         "year_aired": year,
         "about": about
     }
+    # print(database)
     save_database(database)  # Save the updated database
 
 def add_new_record(record, database):
@@ -154,8 +164,9 @@ def add_new_record(record, database):
     elif len(record) == 4:
         about = record[2]  # Third element is the 'about' description
         current_episode_info = record[3]
-        current_episode = int(current_episode_info.split(',')[-1]) if isinstance(current_episode_info, str) and all(part.isdigit() for part in current_episode_info.split(',')) else int(current_episode_info)
-    
+        #( current_episode = int(current_episode_info.split(',')[-1]) if isinstance(current_episode_info, str) and all(part.isdigit() for part in current_episode_info.split(',')) else int(current_episode_info)
+        current_episode = int(max(list(record[3])))
+        print(current_episode)
     
     # Determine the status based on the current episode
     status = "Not Started Watching"

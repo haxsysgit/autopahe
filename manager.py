@@ -1,7 +1,13 @@
 import json
 import os
 
-DATABASE_FILE = "./animerecord.json"
+cwd = os.path.dirname(os.path.abspath(__file__))
+
+if not os.path.exists("json_data"):
+    os.mkdir(os.path.join(cwd, "json_data"))
+
+DATABASE_FILE = os.path.join(cwd, "json_data/animerecord.json")
+
 
 def ensure_file_exists():
     """
@@ -41,19 +47,18 @@ def update_entry(record, database=None):
     if database is None:
         database = load_database()  # Load the current database only if not passed as an argument
     
-
-    keyword = record[0]
     title = record[1].get('title')
     
-    # Find the index of the existing record by matching the keyword
-    existing_index = next((index for index, data in database.items() if data["keyword"] == keyword), None)
+    # Find the index of the existing record by matching the title
+    existing_index = next((index for index, data in database.items() if data["title"] == title), None)
     
     if existing_index is None:
-        print(f"No existing record found for keyword '{keyword}'. Adding as new record.")
+        print(f"No existing record found for title '{title}'. Adding as new record.")
         add_new_record(record, database)  # If no existing record, add it as a new record
         return
     
     # Extract record details
+    keyword = record[0]
     anime_type = record[1].get('type')
     max_episode = record[1].get('episodes')
     year = record[1].get('year')
@@ -61,55 +66,34 @@ def update_entry(record, database=None):
     
     changes = []
     for k,v in database.items():
-        if database[k]['keyword'] == keyword :
+        if database[k]['title'] == title :
             changes.append(database[k]['about'])
-            # print(changes)
             changes.append(database[k]['current_episode'])
-            # print(changes)     
-
-
     
     about = changes[0]
-    # print(about)
     current_episode = changes[1]
 
-
-    if isinstance(current_episode,str):
+    if isinstance(current_episode, str):
         current_episode = 0
 
-    # print(f'Current_episode : {current_episode}')
-
-    # print(about)
-
-    # print(f'Current_episode : {current_episode}')
-    
-    
-    # Handle the different possible lengths of the record input
     if len(record) == 3:
-        # Check if the third item is the 'about' field or the 'current_episode' information
-        if ',' in record[2] and len(record[2]) < 30:
-            latest_episode = max(list(int(s) for s in record[2].split(',')))
-            current_episode = latest_episode if current_episode < latest_episode else current_episode
-            # print(f'Current_episode : {current_episode}')
-
+        if type(record[2]) == int:
+            current_episode = record[2] if current_episode < record[2] else current_episode
         else:
-            about = record[2]  # Treat it as 'about'
+            if ',' in record[2] and len(record[2]) < 30:
+                latest_episode = max(list(int(s) for s in record[2].split(',')))
+                current_episode = latest_episode if current_episode < latest_episode else current_episode
+            else:
+                about = record[2]
 
     elif len(record) == 4:
-        about = record[2]  # Third element is the 'about' description
+        about = record[2]
         current_episode_info = record[3]
-
         latest_episode = max(list(int(s) for s in current_episode_info.split(',')))
         current_episode = latest_episode if current_episode < latest_episode else current_episode
 
-        
-        
-
-    
-
     # Determine the status based on the current episode
     status = "Not Started Watching"
-
     try:
         if current_episode > 0:
             if current_episode < max_episode:
@@ -120,8 +104,6 @@ def update_entry(record, database=None):
         print(f"\n{current_episode} is currently str,'>' not supported between instances of 'str' and 'int'")
         pass
 
-    
-    
     # Update the existing record with new details
     database[existing_index] = {
         "title": title,
@@ -135,7 +117,6 @@ def update_entry(record, database=None):
         "year_aired": year,
         "about": about
     }
-    # print(database)
     save_database(database)  # Save the updated database
 
 def add_new_record(record, database):
@@ -145,30 +126,26 @@ def add_new_record(record, database):
     next_index = get_next_index(database)
     
     # Extract record details
+    keyword = record[0]
+    title = record[1].get('title')
     anime_type = record[1].get('type')
     max_episode = record[1].get('episodes')
     year = record[1].get('year')
     cover = record[1].get('poster')
 
-    # Identify and extract the 'about' and 'current_episode' fields
     about = ""
     current_episode = 0
 
-    # Handle the different possible lengths of the record input
     if len(record) == 3:
-        # Check if the third item is the 'about' field or the 'current_episode' information
         if ',' in record[2] and all(part.isdigit() for part in record[2].split(',')):
-            current_episode = int(record[2].split(',')[-1])  # Treat it as episode info
+            current_episode = int(record[2].split(',')[-1])
         else:
-            about = record[2]  # Treat it as 'about'
+            about = record[2]
     elif len(record) == 4:
-        about = record[2]  # Third element is the 'about' description
+        about = record[2]
         current_episode_info = record[3]
-        #( current_episode = int(current_episode_info.split(',')[-1]) if isinstance(current_episode_info, str) and all(part.isdigit() for part in current_episode_info.split(',')) else int(current_episode_info)
         current_episode = int(max(list(record[3])))
-        print(current_episode)
-    
-    # Determine the status based on the current episode
+
     status = "Not Started Watching"
     if current_episode > 0:
         if current_episode < max_episode:
@@ -176,10 +153,9 @@ def add_new_record(record, database):
         else:
             status = "Completed"
 
-    # Add the new record to the database
     database[next_index] = {
-        "title": record[1].get('title'),
-        "keyword": record[0],
+        "title": title,
+        "keyword": keyword,
         "type": anime_type,
         "cover_photo": cover,
         "rating": 0,
@@ -189,54 +165,50 @@ def add_new_record(record, database):
         "year_aired": year,
         "about": about
     }
-    save_database(database)  # Save the updated database
+    save_database(database)
 
 def process_record(record, update=False):
     """
     Process and add a new record to the database. If the record exists, update it if `update` is True.
     """
-    database = load_database()  # Load the current database
+    database = load_database()
     
-    keyword = record[0]
+    title = record[1].get('title')
     
-    # Check if the record already exists in the database by keyword
-    existing_index = next((index for index, data in database.items() if data["keyword"] == keyword), None)
+    # Check if the record already exists in the database by title
+    existing_index = next((index for index, data in database.items() if data["title"] == title), None)
     
     if existing_index is not None:
-        # If record already exists, update it only if `update` is True
         if update:
-            print(f"Record with keyword '{keyword}' already exists. Updating it.")
+            print(f"Record with title '{title}' already exists. Updating it.")
             update_entry(record, database)
         else:
-            print(f"Record with keyword '{keyword}' already exists. No action taken.")
+            print(f"Record with title '{title}' already exists. No action taken.")
     else:
-        print(f"Adding new record with keyword '{keyword}'.")
+        print(f"Adding new record with title '{title}'.")
         add_new_record(record, database)
 
 def search_record(query):
     """
     Search for records in the database that match the query.
     """
-    database = load_database()  # Load the current database
+    database = load_database()
     
-    results = {}  # Initialize a dictionary to hold search results
+    results = {}
     
-    # Iterate over each record in the database
     for key, value in database.items():
-        lower_query = query.lower()  # Convert query to lowercase for case-insensitive search
-        
-        # Check if the query is present in the 'keyword' or 'title' fields
-        if lower_query in value["keyword"].lower() or lower_query in value["title"].lower():
-            results[key] = value  # Add matching record to results
+        lower_query = query.lower()
+        if lower_query in value["title"].lower() or lower_query in value["keyword"].lower():
+            results[key] = value
     
-    return results  # Return the search results
+    return results
 
 def print_all_records():
     """
     Print all records from the database in a formatted JSON.
     """
-    database = load_database()  # Load the current database
-    print(json.dumps(database, indent=4))  # Print database with indentation for readability
+    database = load_database()
+    print(json.dumps(database, indent=4))
 
 # Example usage
 sample = [
@@ -253,8 +225,7 @@ sample = [
         'poster': 'https://i.animepahe.ru/posters/3c01c83a35626201293b677d166226fcef7e13b00b875991907f1a54aebad626.jpg',
         'session': 'fccced41-eb03-ea7c-ceaf-13b40bad9cd3'
     },
-'The world is in the midst of the industrial revolution when horrific creatures emerge from a mysterious virus, ripping through the flesh of humans to sate their never-ending appetite. The only way to kill these beings, known as "Kabane," is by destroying their steel-coated hearts. However, if bitten by one of these monsters, the victim is doomed to a fate worse than death, as the fallen rise once more to join the ranks of their fellow undead.Only the most fortified of civilizations have survived this turmoil, as is the case with the island of Hinomoto, where mankind has created a massive wall to protect themselves from the endless hordes of Kabane. The only way into these giant fortresses is via heavily-armored trains, which are serviced and built by young men such as Ikoma. Having created a deadly weapon that he believes will easily pierce through the hearts of Kabane, Ikoma eagerly awaits the day when he will be able to fight using his new invention. Little does he know, however, that his chance will come much sooner than he expected...',
-
+    'The world is in the midst of the industrial revolution when horrific creatures emerge from a mysterious virus...'
 ]
 
 if __name__ == '__main__':

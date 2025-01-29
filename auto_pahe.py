@@ -1,7 +1,7 @@
 #! /usr/bin/python3
-import time,argparse,os,sys
+import time,argparse,os,sys,requests
+from re import search
 from pathlib import Path
-import sys
 import logging
 from json import loads,load,dump,dumps
 from bs4 import BeautifulSoup
@@ -100,39 +100,42 @@ def data_report(data:dict,filepath = "autopahe_data.json",):
             dump(new_data,st,indent=4)
 
 
-def driver_output(url:str,driver = False,content = False,json = False, wait_time = 10):
-
-    if driver == True : 
-
-        driver = browser()
+def driver_output(url: str, driver=False, content=False, json=False, wait_time=10):
+    if driver: 
+        # Initialize the browser
+        driver_instance = browser()
         try:
-            driver.get(url)
-        except:
-            print("Selenium crashed while getting this page, please check ur internet connection")
-            driver.quit()
-            exit()
+            driver_instance.get(url)
+        except Exception as e:
+            # Log the error without exiting the program
+            logging.error(f"Selenium failed to load the page: {e}")
+            driver_instance.quit()
+            return None  # Return None to indicate failure but allow the program to continue
 
-        driver.refresh()
+        # Refresh page to ensure it's up-to-date
+        driver_instance.refresh()
     
-    # Wait for the page to reload
-        driver.implicitly_wait(wait_time)  # Adjust the timeout as needed
-    
+        # Wait for the page to load
+        driver_instance.implicitly_wait(wait_time)
+
         if content:
-            # Get page source after reloading
-            page_source = driver.page_source
-            driver.quit()
+            # Get the page content (HTML)
+            page_source = driver_instance.page_source
+            driver_instance.quit()
             return page_source
-        
-        elif json == True:
-            # Get the json response again after reloading
-            json_data = driver.execute_script("return document.body.textContent;")
-            driver.quit()
-            return json_data
-        
+
+        elif json:
+            # Get the JSON content
+            json_data = driver_instance.execute_script("return document.body.textContent;")
+            driver_instance.quit()
+            dict_data = loads(json_data)
+            return dict_data
     else:
-        logging.error("Invalid arguments for driver_output")
-        print("Use the content( arg to get page_content or the json arg to get json response ")
-        exit()
+        # Log an error if invalid parameters were provided
+        logging.error("Invalid arguments provided to driver_output function.")
+        print("Use the 'content' argument to get page content or 'json' argument to get JSON response.")
+        return None  # Return None to indicate the invalid argument scenario
+
 
 
     
@@ -216,17 +219,17 @@ n()
 # ============================ The requests argument handler function===============================
 
 
-# TEXT wrap decorator
-def box_text(func):
-    def wrapper():
-        box_width = 70
-        padding = (box_width - len(func())) // 2
-        print('*' * box_width)
-        print('*' + ' ' * padding + func() + ' ' * (box_width - len(func()) - padding) + '*')
-        print('*' * box_width)
+# # TEXT wrap decorator
+# def box_text(func):
+#     def wrapper():
+#         box_width = 70
+#         padding = (box_width - len(func())) // 2
+#         print('*' * box_width)
+#         print('*' + ' ' * padding + func() + ' ' * (box_width - len(func()) - padding) + '*')
+#         print('*' * box_width)
 
         
-    return wrapper
+#     return wrapper
 
     
 # =======================================================================================================
@@ -245,22 +248,27 @@ def lookup(arg):
     animepahe_search_pattern = f'https://animepahe.ru/api?m=search&q={arg}'
 
     try:
-        search_response = driver_output(animepahe_search_pattern,driver=True,json=True)
-    except:
-        search_response = driver_output(animepahe_search_pattern,driver=True,json=True, wait_time = 30)
 
+        search_response = requests.get(animepahe_search_pattern).content
+
+        #return if no anime found
+        if not search_response:
+            Banners.header()
+            logging.info("No matching anime found. Retry!")
+            return
+        
+        # converting response json data to python dictionary for operation
+        search_response_dict = loads(search_response)
+
+    except:
+
+        search_response = driver_output(animepahe_search_pattern,driver=True,json=True, wait_time = 30)
+        search_response_dict = search_response
 
     # print(search_response)
 
-    #return if no anime found
-    if not search_response:
-        Banners.header()
-        logging.info("No matching anime found. Retry!")
-        return
+    # print(animepahe_search_pattern)
 
-
-    # converting response json data to python dictionary for operation
-    search_response_dict = loads(search_response)
     # all animepahe has a session url and the url will be https://animepahe.com/anime/[then the session id]
 
 
@@ -322,12 +330,12 @@ def index(arg):
 
 
     try:
-        jsonpage_dict = loads(driver_output(anime_url_format,driver=True,json=True))
+        jsonpage_dict = loads(requests.get(anime_url_format).content)
     except:
-        jsonpage_dict = loads(driver_output(anime_url_format,driver=True,json=True, wait_time = 30))
+        jsonpage_dict = driver_output(anime_url_format,driver=True,json=True, wait_time = 30)
 
 
-
+ 
     episto = jsonpage_dict['total']
     year = search_response_dict['data'][arg]['year']
     type = search_response_dict['data'][arg]['type']
@@ -351,125 +359,143 @@ def about():
         return abt[0].text.strip()
 
 
-def download(arg = 1):
-    # using return value of the search function to get the page
-    # using the json data from the page url to get page where the episodes to watch are
+def download(arg=1):
+    """
+    Downloads the specified episode of the anime by navigating through the webpage using Selenium 
+    and extracting the download link.
+    """
+    #Initializing driver
+    driver = browser()
 
+    # Convert the argument to an integer to ensure it is in the correct format
     arg = int(arg)
-
-
-    #session string of the stream episode
+    
+    # Retrieve the session ID for the selected episode from the global jsonpage_dict
     episode_session = jsonpage_dict['data'][arg-1]['session']
 
-    
-    #stream page url format
+    # Construct the URL for the stream page for the specific episode using the session ID
     stream_page_url = f'https://animepahe.com/play/{session_id}/{episode_session}'
-    # print(stream_page_url)
 
-    
-    # get steampage 
-    driver = browser()
+    # Open the stream page URL in the browser
     driver.get(stream_page_url)
 
+    # Set an implicit wait for elements to load before interacting with the page
+    driver.implicitly_wait(10)
+
+    # Refresh the page to ensure it's fully loaded
+    driver.refresh()
+
+    # Pause briefly to ensure the page has time to load
     time.sleep(15)
-    stream_page_soup = BeautifulSoup(driver.page_source,'lxml')
+
+    # Parse the page content into a BeautifulSoup object for easier scraping
+    stream_page_soup = BeautifulSoup(driver.page_source, 'lxml')
+
+    # Find all the download links in the page using the specified class name
+    dload = stream_page_soup.find_all('a', class_='dropdown-item', target="_blank")
+
+    # Use a list comprehension to filter out specific resolutions (e.g., 360p, 1080p, and English versions)
+    # The `stlink` is the string version of the link element. We check for matching resolutions with a regex.
+    linkpahe = [
+        (href := BeautifulSoup(stlink, 'html.parser').a['href'])  # Extract the actual download link
+        for link in dload if not (search(r'(360p|1080p|eng)', stlink := str(link)))  # Filter out unwanted links
+    ]
+
+    # If a valid download link is found, proceed with the next steps
+    if linkpahe:
+        # Navigate to the selected download link
+        driver.get(linkpahe[0])
+        
+        # Pause to allow the new page to load
+        time.sleep(10)
+        
+        # Retrieve the page source of the new page (now the actual download page)
+        kwik_page = driver.page_source
+
+        #Closing opened driver instance
+        driver.quit()
     
-    dload = stream_page_soup.find_all('a',class_='dropdown-item',target="_blank")
-    # print (dload)
-    from re import search
-
-
-    # for link in dload:
-    #     stlink = str(link)
-    #     match = re.search(r'720p', stlink)
-    #     if match:
-    #         for link in stlink:
-    #             soup = BeautifulSoup(link, 'html.parser')
-    #             href = soup.a['href']
-    #             print(href)
-    
-    # i am sure u are not wise enough to know what is going on
-    #but the code above was shortened to the code below
-    #using walrus operator and list comprehension
-    #and it return a list of chars which when combined will return the link
-
-    linkpahe = [(href:=BeautifulSoup(stlink, 'html.parser').a['href']) for link in dload if not (search(r'(360p|1080p|eng)', stlink:=str(link)))]
-    
-    #the linkpahe variable carries a list of the characters of the link
-    #so the pahewin variable will return the link webpage content
-     
-    # print(linkpahe)
-    # print(stream_page_soup)
-    driver.get(f"{linkpahe[0]}")
-    # driver.implicitly_wait(10)
-    time.sleep(10)
-    kwik_page = driver.page_source
-    driver.quit()
-
-    #getting the link to the kwik download page
-
-    kwik_cx=BeautifulSoup(kwik_page,'lxml')
-
-    # print(kwik_cx)
-
-    #getting kwik.cx f download link
-    kwik = kwik_cx.find('a', class_='redirect')['href']
-
-    # print(f"Download link => {kwik}")
-    Banners.downloading(animepicked,arg)
-    
-    kwik_download(url=kwik, dpath=DOWNLOADS, ep=arg, animename = animepicked)
+        
+        # Parse the page content to extract the actual download link (from kwik.cx)
+        kwik_cx = BeautifulSoup(kwik_page, 'lxml')
+        
+        # Extract the direct download link from the page (looking for the 'redirect' class)
+        kwik = kwik_cx.find('a', class_='redirect')['href']
+        
+        # Print the found download link to the terminal
+        print(f"\nDownload link => {kwik}\n")
+        
+        # Call the Banners.downloading method to display a download banner
+        Banners.downloading(animepicked, arg)
+        
+        # Trigger the download process using the kwik link and specify the download directory
+        kwik_download(url=kwik, dpath=DOWNLOADS, ep=arg, animename=animepicked)
 
 
 
+                
+    # ========================================== Multi Download Utility ==========================================
 
-            
 def multi_download(eps):
-    eps = str(eps)
-    # given arg specifies '-' for range
-    # New format for list comprehension  
-    episodes = [
-        num
-        for segment in eps.split(",")
-        for num in (
-            range(int(segment.split("-")[0]), int(segment.split("-")[1]) + 1)
-            if "-" in segment
-            else [int(segment)]
-        )]
-    
-    Banners.downloading(animepicked,eps)
+    try:
+        # Convert the eps argument into a string to handle both single numbers and ranges
+        eps = str(eps)
+        
+        # Parse the input and create a list of episode numbers
+        # The input format could either be a single episode (e.g., "3"), a range (e.g., "1-5"),
+        # or a comma-separated list of both (e.g., "1-3,5,7")
+        episodes = [
+            num  # The current episode number
+            for segment in eps.split(",")  # Split the input by commas for multiple entries
+            for num in (
+                # If the segment contains a range (e.g., "1-3"), generate the list of numbers
+                range(int(segment.split("-")[0]), int(segment.split("-")[1]) + 1)
+                if "-" in segment
+                else [int(segment)]  # If not a range, just use the number itself
+            )
+        ]
+        
 
-    
-    with concur.ThreadPoolExecutor() as executor:
-        executor.map(download, episodes)
+        # Print a message for the start of the download, showing the anime name and episodes to be downloaded
+        Banners.downloading(animepicked, eps)
+        
+        # Use ThreadPoolExecutor for parallel downloading of episodes
+        with concur.ThreadPoolExecutor() as executor:
+            # Use executor.map to download each episode in the episodes list concurrently
+            executor.map(download, episodes)
 
+    except Exception as e:
+        # Catch any exceptions that occur during parsing or downloading
+        logging.error(f"Error in multi_download: {e}")
 
 
 
 # ----------------------------------------------End of All the Argument Handling----------------------------------------------------------
 
 #
-def interactive_main():
-    # Selecting browser of choice
+# Function to handle user interaction and guide them through the anime selection and download process
+def interactive_main(driver):
+    # Prompt the user to select their preferred browser (e.g., chrome or firefox)
     choice = str(input("Enter your favorite browser [e.g chrome] >> "))
 
-    # Search prompt for search function
+    # Prompt the user to search for an anime by name
     lookup_anime = str(input("\nSearch an anime [e.g 'one piece'] >> "))
 
-    # searching anime with the lookup function
+    # Call the lookup function to search for the anime
     lookup(lookup_anime)
 
-    # selection prompt for the anime search
+    # Prompt the user to select an anime index from the search results (default is 0)
     select_index = int(input("Select anime index [default : 0] >> "))
     
-    # handling the selected anime metadata
+    # Call the index function to handle metadata of the selected anime
     index(select_index)
     
-    # summary info on the selected anime
+    # Get summary info about the selected anime
     info = about()
+    # Display the anime information using the Banners class
     Banners.i_info(info)
 
-    # Handling episode to download prompt
+    # Prompt the user for the type of download they want
     download_type = str(input("""
     Enter the type of download facility you want:
     
@@ -480,38 +506,42 @@ def interactive_main():
     
     >> """))
     
+    # Prompt for the episode(s) to download
     ep_to_download = (input("Enter episode(s) to download >> "))
 
+    # A dictionary mapping the download type to the corresponding function
     switch = {
-        "1": download,
-        "2": multi_download,
-        "4": info,
-        's': download,
-        'md': multi_download,
-        'i': info,
-        'single_download': download,
-        'multi_download': multi_download,
-        'info': info
+        "1": download,  # Single download
+        "2": multi_download,  # Multi download
+        "4": info,  # Display info
+        's': download,  # Single download alias
+        'md': multi_download,  # Multi download alias
+        'i': info,  # Info alias
+        'single_download': download,  # Single download alias
+        'multi_download': multi_download,  # Multi download alias
+        'info': info  # Info alias
     }
 
-    # initiating the action for the choice
+    # Retrieve the function based on the user's choice and execute it
     selected_function = switch.get(download_type)
 
+    # If the function is valid, execute it, otherwise print an error
     if selected_function:
-        selected_function(ep_to_download)
+        selected_function(ep_to_download,driver)
     else:
         print("Invalid input. Please select a valid option.")
 
+
 def command_main(args):
     global barg
-    barg = args.browser
-    sarg = args.search
-    iarg = args.index
-    sdarg = args.single_download
-    mdarg = args.multi_download
-    abtarg = args.about
-    rarg = args.record
-    dtarg = args.execution_data  # New argument for retrieving stats by date
+    barg = args.browser  # Selected browser
+    sarg = args.search  # Search query for anime
+    iarg = args.index  # Index of selected anime
+    sdarg = args.single_download  # Argument for single episode download
+    mdarg = args.multi_download  # Argument for multi-episode download
+    abtarg = args.about  # Flag for displaying anime information
+    rarg = args.record  # Argument for interacting with records
+    dtarg = args.execution_data  # New argument for execution stats by date
 
     # Reset the run count
     reset_run_count()
@@ -547,9 +577,8 @@ def command_main(args):
     # Multi Download function
     if mdarg:
         records.append(mdarg)
-        process_record(records, update=True)
         multi_download(mdarg)
-
+        process_record(records, update=True)
 
     # Record argument
     if rarg:
@@ -622,14 +651,17 @@ def command_main(args):
 
 
 
+# Main entry point for the script that processes arguments and triggers the appropriate actions
 def main():
-    
-    # Reset the run count
+
+
+    # Reset the run count to start fresh
     reset_run_count()
 
+    # Record the start time of the execution
     start_time = time.perf_counter()
 
-
+    # Argument parser setup to handle command-line inputs
     parser = argparse.ArgumentParser()
     parser.add_argument('-b', '--browser', help='Select the desired browser (chrome or firefox). Default is chrome.')
     parser.add_argument('-s', '--search', type=str, help='Search for an anime by name.')
@@ -640,30 +672,39 @@ def main():
     parser.add_argument('-r', '--record', help='Interact with the records/database (view, [index], [keyword]).')
     
     # Adding help message for exec_data
-
     parser.add_argument(
         '-dt', '--execution_data',
         help=(
             "Retrieve execution data for a specific date or date range. "
             "Format : YYYY-MM-DD (year-month-day)"
-            "Examples: ["
-            "'today', 'yesterday', 'last 3 days', 'last week', "
+            "Examples: ['today', 'yesterday', 'last 3 days', 'last week', "
             "'this week', '2 weeks ago', 'last month', '1 month ago'.]"
         )
     )
 
-
+    # Parse the command-line arguments
     args = parser.parse_args()
 
+    # If any arguments are provided, process them using command_main
     if any(vars(args).values()):
         command_main(args)
     else:
+        # If no arguments are provided, run the interactive main function
         interactive_main()
-    
-    # Log execution time
+
+    # Log the execution time once the script has finished
     log_execution_time(start_time)
 
+
+
+
+
+#================================================================ End of Arguments Handling =======================================================
+
+# If the script is executed directly, call the main function
 if __name__ == '__main__':
     main()
 else:
+    # If the script is imported as a module, display the header
     Banners.header()
+

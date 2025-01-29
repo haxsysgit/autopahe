@@ -6,12 +6,15 @@ from datetime import datetime, timedelta
 
 # Initialize counters and timings
 cwd = os.path.dirname(os.path.abspath(__file__))
+json_dir = os.path.join(cwd, "json_data")  # Full path to "json_data"
+
 # print(os.path.expandvars(cwd))
 script_run_count = 0
 first_run_time = datetime.now()
 
-if not os.path.exists("json_data"):
-    os.mkdir(os.path.join(cwd, "json_data"))
+
+if not os.path.exists(json_dir):
+    os.mkdir(json_dir)
     
 
 DATA_FILE = os.path.join(cwd, "json_data/execution_data.py")

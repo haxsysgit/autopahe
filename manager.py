@@ -2,9 +2,10 @@ import json
 import os
 
 cwd = os.path.dirname(os.path.abspath(__file__))
+json_dir = os.path.join(cwd, "json_data")  # Full path to "json_data"
 
-if not os.path.exists("json_data"):
-    os.mkdir(os.path.join(cwd, "json_data"))
+if not os.path.exists(json_dir):
+    os.mkdir(json_dir)
 
 DATABASE_FILE = os.path.join(cwd, "json_data/animerecord.json")
 
@@ -180,12 +181,12 @@ def process_record(record, update=False):
     
     if existing_index is not None:
         if update:
-            print(f"Record with title '{title}' already exists. Updating it.")
+            print(f"\nRecord with title '{title}' already exists. Updating it.\n")
             update_entry(record, database)
         else:
-            print(f"Record with title '{title}' already exists. No action taken.")
+            print(f"\nRecord with title '{title}' already exists. No action taken.\n")
     else:
-        print(f"Adding new record with title '{title}'.")
+        print(f"\nAdding new record with title '{title}'.")
         add_new_record(record, database)
 
 def search_record(query):

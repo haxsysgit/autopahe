@@ -61,6 +61,7 @@ def update_entry(record, database=None):
     # Extract record details
     keyword = record[0]
     anime_type = record[1].get('type')
+    anipage = record[1].get('anime_page')
     max_episode = record[1].get('episodes')
     year = record[1].get('year')
     cover = record[1].get('poster')
@@ -108,7 +109,7 @@ def update_entry(record, database=None):
     # Update the existing record with new details
     database[existing_index] = {
         "title": title,
-        "keyword": keyword,
+        "Main Page": anipage,
         "type": anime_type,
         "cover_photo": cover,
         "rating": 0,
@@ -131,6 +132,7 @@ def add_new_record(record, database):
     title = record[1].get('title')
     anime_type = record[1].get('type')
     max_episode = record[1].get('episodes')
+    anipage = record[1].get('anime_page')
     year = record[1].get('year')
     cover = record[1].get('poster')
 
@@ -157,6 +159,7 @@ def add_new_record(record, database):
     database[next_index] = {
         "title": title,
         "keyword": keyword,
+        "Main Page": anipage,
         "type": anime_type,
         "cover_photo": cover,
         "rating": 0,

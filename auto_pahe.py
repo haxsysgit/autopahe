@@ -172,7 +172,7 @@ class Banners():
         ----------------------------------------
         ''')
         
-    def select(anime,eps = None,year = None,
+    def select(anime,eps = None,anipage = None ,year = None,
                atype = None,img = None,status = None):
         print(f'''
         ----------------------------------------
@@ -180,6 +180,7 @@ class Banners():
         ----------------------------------------
         
         - Episodes Available : {eps}
+        - Anime Hompage : {anipage}
         - Year released : {year}
         - Type of anime (TV or Movie) : {atype}
         - Cover image : {img}
@@ -342,7 +343,7 @@ def index(arg):
     image = search_response_dict['data'][arg]['poster']
     stat = search_response_dict['data'][arg]['status']
     
-    Banners.select(animepicked,eps=episto,year=year,
+    Banners.select(animepicked,eps=episto, anipage=episode_page_format,year=year,
                    atype = type,img = image,status=stat)
 
     final_data = {**search_response_dict,**jsonpage_dict}
@@ -557,14 +558,17 @@ def command_main(args):
 
     # Index function
     if iarg is not None:
+        index(iarg)
+        search_response_dict["data"][iarg]["anime_page"] = episode_page_format
         records.append(search_response_dict['data'][iarg])
         process_record(records)
-        index(iarg)
 
     # About function
     if abtarg:
         info = about()
         records.append(info)
+        print(records)
+
         process_record(records, update=True)
         Banners.anime_info(animepicked, info)
 

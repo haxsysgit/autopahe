@@ -1,20 +1,33 @@
 #! /usr/bin/python3
-import time,argparse,os,sys,requests
-from re import search
+import time,argparse,os,sys,requests,tempfile
+import re
 from pathlib import Path
 import logging
-from json import loads,load,dump,dumps
+from json import loads,load,dump,dumps,JSONDecodeError
 from bs4 import BeautifulSoup
 from kwikdown import kwik_download
 from manager import process_record,load_database,print_all_records,search_record
 from execution_tracker import log_execution_time, reset_run_count, get_execution_stats
+from multiprocessing import Pool, cpu_count
+import logging
+
+############################################## Selenium imports #################################################
+
 from selenium import webdriver
+from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.firefox.service import Service as chrome_service
 from selenium.webdriver.chrome.service import Service as ff_service
-import concurrent.futures as concur
+from selenium.common.exceptions import WebDriverException
 
 
 ########################################### GLOBAL VARIABLES ######################################
+
+# Paths to your driver executables
+GECKO_PATH = "/snap/bin/geckodriver"
+CHROME_PATH = "/snap/bin/chromedriver"
+
+# Counter for unique Marionette ports
+_port_counter = 2828
 
 # Download path
 system_name = sys.platform.lower()
@@ -52,6 +65,33 @@ records = []
 
 ############################################ BROWSER HANDLING ##########################################################
 
+
+
+def make_firefox_driver():
+    """
+    Return a headless Firefox WebDriver with an isolated profile & unique port.
+    """
+    # global _port_counter
+    opts = webdriver.FirefoxOptions()
+    opts.add_argument("--headless")
+
+    # Isolated clean profile
+    profile_dir = tempfile.mkdtemp(prefix="fw_profile_")
+    opts.profile = profile_dir
+
+    # Avoid using --no-remote/--new-instance (they often break in threads)
+    service = ff_service(executable_path=GECKO_PATH)
+
+    # service = ff_service(executable_path=GECKO_PATH, port=_port_counter)
+    # _port_counter += 1
+
+    # logging.info(f"Launching Firefox on port {service.port}")
+
+    return webdriver.Firefox(service=service, options=opts)
+
+ 
+
+
 def browser(choice="firefox"):
     chrome_guess = ["chrome", "Chrome", "google chrome", "google"]
 
@@ -59,29 +99,84 @@ def browser(choice="firefox"):
 
     if choice.lower() in chrome_guess:
         chserv = chrome_service("/snap/bin/geckodriver")
-        
+        logging.info("Launching Chrome")
         driver = webdriver.Chrome(service=chserv)
 
         logging.info("Using Chrome browser")
 
     elif choice.lower() in ff_guess:
-        ffserv = ff_service("/snap/bin/geckodriver")
 
-        options = webdriver.FirefoxOptions()
-        options.add_argument("--headless")
-        driver = webdriver.Firefox(service=ffserv, options=options)
 
-        logging.info("Using Firefox browser in headless mode\n")
+        logging.info("Launching isolated headless Firefox")
+
+        return make_firefox_driver()
 
     else:
         logging.error("Unsupported browser choice")
-        return 0
+        raise ValueError(f"Unsupported browser: {choice}")
 
-    return driver
 
 
 
 ###############################################################################################
+
+
+def parse_mailfunction_api(text):
+    result = {}
+    data_list = []
+    current_item = None
+    in_data = False
+
+    def parse_value(val):
+        # remove surrounding quotes
+        val = val.strip()
+        if m := re.match(r'^"(.*)"$', val):
+            return m.group(1)
+        # integer?
+        if re.fullmatch(r'\d+', val):
+            return int(val)
+        # float?
+        if re.fullmatch(r'\d+\.\d+', val):
+            return float(val)
+        return val
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        # Top-level until we see 'data'
+        if not in_data:
+            if line == "data":
+                in_data = True
+                continue
+            if key_val := line.split(None, 1):
+                key = key_val[0]
+                if len(key_val) == 2:
+                    val = parse_value(key_val[1])
+                    result[key] = val
+                continue
+
+        # Inside data items
+        # If line is only a number, start new item
+        if re.fullmatch(r'\d+', line):
+            if current_item is not None:
+                data_list.append(current_item)
+            current_item = {}
+        else:
+            # key and value
+            parts = line.split(None, 1)
+            if len(parts) == 2:
+                key, raw_val = parts
+                current_item[key] = parse_value(raw_val)
+
+    # Append last item
+    if current_item is not None:
+        data_list.append(current_item)
+
+    result["data"] = data_list
+    return result
+
 
 
 def data_report(data:dict,filepath = "autopahe_data.json",):
@@ -112,11 +207,8 @@ def driver_output(url: str, driver=False, content=False, json=False, wait_time=1
             driver_instance.quit()
             return None  # Return None to indicate failure but allow the program to continue
 
-        # Refresh page to ensure it's up-to-date
-        driver_instance.refresh()
-    
-        # Wait for the page to load
-        driver_instance.implicitly_wait(wait_time)
+        # Refresh page to ensure it's up-to-date , Wait for the page to load
+        driver_instance.refresh();    driver_instance.implicitly_wait(wait_time)
 
         if content:
             # Get the page content (HTML)
@@ -126,15 +218,24 @@ def driver_output(url: str, driver=False, content=False, json=False, wait_time=1
 
         elif json:
             # Get the JSON content
-            json_data = driver_instance.execute_script("return document.body.textContent;")
+            json_data = driver_instance.execute_script("return document.body.innerText;")
             driver_instance.quit()
-            dict_data = loads(json_data)
+            # print(url)
+            # print(json_data)
+
+            dict_data = parse_mailfunction_api(json_data)
+            # print(dict_data)
+            if dict_data is None:
+                raise ValueError("Failed to parse malformed JSON.")
+
             return dict_data
     else:
         # Log an error if invalid parameters were provided
         logging.error("Invalid arguments provided to driver_output function.")
         print("Use the 'content' argument to get page content or 'json' argument to get JSON response.")
         return None  # Return None to indicate the invalid argument scenario
+    
+    return driver
 
 
 
@@ -236,6 +337,7 @@ n()
 # =======================================================================================================
 
 
+
 def lookup(arg):
 
     global search_response_dict
@@ -264,6 +366,7 @@ def lookup(arg):
     except:
 
         search_response = driver_output(animepahe_search_pattern,driver=True,json=True, wait_time = 30)
+        # print(search_response)
         search_response_dict = search_response
 
     # print(search_response)
@@ -360,114 +463,127 @@ def about():
         return abt[0].text.strip()
 
 
-def download(arg=1):
+
+
+
+def download(arg=1, download_file=True):
     """
     Downloads the specified episode of the anime by navigating through the webpage using Selenium 
     and extracting the download link.
     """
-    #Initializing driver
-    driver = browser()
-
-    # Convert the argument to an integer to ensure it is in the correct format
-    arg = int(arg)
     
-    # Retrieve the session ID for the selected episode from the global jsonpage_dict
-    episode_session = jsonpage_dict['data'][arg-1]['session']
 
-    # Construct the URL for the stream page for the specific episode using the session ID
-    stream_page_url = f'https://animepahe.com/play/{session_id}/{episode_session}'
+    driver = None
+    try:
+        # Convert the argument to an integer to ensure it is in the correct format
+        arg = int(arg)
 
-    # Open the stream page URL in the browser
-    driver.get(stream_page_url)
+        # Initializing driver
+        driver = browser()
 
-    # Set an implicit wait for elements to load before interacting with the page
-    driver.implicitly_wait(10)
+        # Retrieve the session ID for the selected episode from the global jsonpage_dict
+        episode_session = jsonpage_dict['data'][arg - 1]['session']
 
-    # Refresh the page to ensure it's fully loaded
-    driver.refresh()
+        # Construct the URL for the stream page for the specific episode using the session ID
+        stream_page_url = f'https://animepahe.com/play/{session_id}/{episode_session}'
 
-    # Pause briefly to ensure the page has time to load
-    time.sleep(15)
+        # Open the stream page URL in the browser
+        driver.get(stream_page_url)
 
-    # Parse the page content into a BeautifulSoup object for easier scraping
-    stream_page_soup = BeautifulSoup(driver.page_source, 'lxml')
+        # Set an implicit wait for elements to load before interacting with the page
+        driver.implicitly_wait(10)
 
-    # Find all the download links in the page using the specified class name
-    dload = stream_page_soup.find_all('a', class_='dropdown-item', target="_blank")
+        # Pause briefly to ensure the page has time to load
+        time.sleep(15)
 
-    # Use a list comprehension to filter out specific resolutions (e.g., 360p, 1080p, and English versions)
-    # The `stlink` is the string version of the link element. We check for matching resolutions with a regex.
-    linkpahe = [
-        (href := BeautifulSoup(stlink, 'html.parser').a['href'])  # Extract the actual download link
-        for link in dload if not (search(r'(360p|1080p|eng)', stlink := str(link)))  # Filter out unwanted links
-    ]
+        # Parse the page content into a BeautifulSoup object for easier scraping
+        stream_page_soup = BeautifulSoup(driver.page_source, 'lxml')
 
-    # If a valid download link is found, proceed with the next steps
-    if linkpahe:
+        # Find all the download links in the page using the specified class name
+        dload = stream_page_soup.find_all('a', class_='dropdown-item', target="_blank")
+
+        # Use a list comprehension to filter out specific resolutions (e.g., 360p, 1080p, and English versions)
+        # The `stlink` is the string version of the link element. We check for matching resolutions with a regex.
+        linkpahe = [
+            (href := BeautifulSoup(stlink, 'html.parser').a['href'])  # Extract the actual download link
+            for link in dload if not (re.search(r'(360p|1080p|eng)', stlink := str(link)))  # Filter out unwanted links
+        ]
+
+        # If a valid download link is found, proceed with the next steps
+        if not linkpahe:
+            raise ValueError(f"No valid download link found for episode {arg}")
+
         # Navigate to the selected download link
         driver.get(linkpahe[0])
         
         # Pause to allow the new page to load
         time.sleep(10)
-        
+
         # Retrieve the page source of the new page (now the actual download page)
         kwik_page = driver.page_source
 
-        #Closing opened driver instance
-        driver.quit()
-    
-        
-        # Parse the page content to extract the actual download link (from kwik.cx)
-        kwik_cx = BeautifulSoup(kwik_page, 'lxml')
-        
-        # Extract the direct download link from the page (looking for the 'redirect' class)
-        kwik = kwik_cx.find('a', class_='redirect')['href']
-        
-        # Print the found download link to the terminal
-        print(f"\nDownload link => {kwik}\n")
-        
+    except WebDriverException as e:
+        # Log browser-related errors
+        logging.error(f"Episode {arg} failed: {e}")
+        if driver:
+            driver.quit()
+        return
+
+    except Exception as e:
+        # Log general errors
+        logging.error(f"Episode {arg} failed: {e}")
+        if driver:
+            driver.quit()
+        return
+
+    finally:
+        # Closing opened driver instance
+        if driver:
+            driver.quit()
+
+    # Parse the page content to extract the actual download link (from kwik.cx)
+    kwik_cx = BeautifulSoup(kwik_page, 'lxml')
+
+    # Extract the direct download link from the page (looking for the 'redirect' class)
+    kwik = kwik_cx.find('a', class_='redirect')['href']
+
+    # Print the found download link to the terminal
+    print(f"\nDownload link => {kwik}\n")
+
+    if download_file:
         # Call the Banners.downloading method to display a download banner
         Banners.downloading(animepicked, arg)
-        
+
         # Trigger the download process using the kwik link and specify the download directory
         kwik_download(url=kwik, dpath=DOWNLOADS, ep=arg, animename=animepicked)
-
+    else:
+        return kwik
 
 
                 
     # ========================================== Multi Download Utility ==========================================
 
-def multi_download(eps):
-    try:
-        # Convert the eps argument into a string to handle both single numbers and ranges
-        eps = str(eps)
-        
-        # Parse the input and create a list of episode numbers
-        # The input format could either be a single episode (e.g., "3"), a range (e.g., "1-5"),
-        # or a comma-separated list of both (e.g., "1-3,5,7")
-        episodes = [
-            num  # The current episode number
-            for segment in eps.split(",")  # Split the input by commas for multiple entries
-            for num in (
-                # If the segment contains a range (e.g., "1-3"), generate the list of numbers
-                range(int(segment.split("-")[0]), int(segment.split("-")[1]) + 1)
-                if "-" in segment
-                else [int(segment)]  # If not a range, just use the number itself
-            )
-        ]
-        
+    
+def multi_download(arg: str, download_file=True):
+    """
+    Downloads multiple episodes sequentially using the standard download() function.
+    This is a primitive implementation with no multiprocessing, printing, or output.
+    """
+    # Parse input like '2,3,5-7' into [2,3,5,6,7]
+    eps = []
+    for part in arg.split(','):
+        if '-' in part:
+            start, end = map(int, part.split('-'))
+            eps.extend(range(start, end + 1))
+        elif part.isdigit():
+            eps.append(int(part))
 
-        # Print a message for the start of the download, showing the anime name and episodes to be downloaded
-        Banners.downloading(animepicked, eps)
-        
-        # Use ThreadPoolExecutor for parallel downloading of episodes
-        with concur.ThreadPoolExecutor() as executor:
-            # Use executor.map to download each episode in the episodes list concurrently
-            executor.map(download, episodes)
+    for ep in eps:
+        try:
+            download(arg=ep, download_file=download_file)
+        except Exception as e:
+            logging.error(f"Episode {ep} failed: {e}")
 
-    except Exception as e:
-        # Catch any exceptions that occur during parsing or downloading
-        logging.error(f"Error in multi_download: {e}")
 
 
 
@@ -581,7 +697,7 @@ def command_main(args):
     # Multi Download function
     if mdarg:
         records.append(mdarg)
-        multi_download(mdarg)
+        multi_download(mdarg,download_file=True)
         process_record(records, update=True)
 
     # Record argument

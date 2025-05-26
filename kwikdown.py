@@ -1,152 +1,123 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-import os
-import time
-import requests
-import tqdm
-from urllib.parse import urlparse
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.service import Service as ChromeService
+import requests                # For sending HTTP requests and managing sessions
+import os                     # For file/directory management
+import tqdm                   # For progress bar during file download
+import time                   # For delay/retries
+from bs4 import BeautifulSoup # For parsing HTML content
+from selenium import webdriver  # For controlling a real browser (headless)
 from selenium.webdriver.firefox.service import Service as FirefoxService
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait         # To wait for elements to load
 from selenium.webdriver.support import expected_conditions as EC
-from bs4 import BeautifulSoup
-from requests.exceptions import ChunkedEncodingError, RequestException
 
-# Download function that retries a few times if there's a network error
-def download_with_retries(download_url, referer, filename, ep, chunk_size=1024, retries=5):
-    parsed = urlparse(download_url)
-    headers = {
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br, zstd',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Connection': 'keep-alive',
-        'Host': parsed.netloc,
-        'Referer': referer,
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'cross-site',
-        'Upgrade-Insecure-Requests': '1',
-        'User-Agent': 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0',
-        'Priority': 'u=0, i'
-    }
-
+# Download the file with retry support
+def download_with_retries(session, posturl, params, headers, filename, ep, chunk_size=1024, retries=5):
     for attempt in range(1, retries + 1):
         try:
-            # Attempt the download
-            r = requests.get(download_url, headers=headers, stream=True, timeout=30)
+            # Send POST request to download link with token and headers
+            response = session.post(posturl, data=params, headers=headers, stream=True, timeout=30)
+            # print(response.headers)
 
-            # Extract filename if provided
-            cd = r.headers.get('content-disposition', '')
-            if 'filename=' in cd:
-                filename = cd.split('filename=')[1].strip('"')
-
-            # Use fallback filename if none provided
-            if not filename:
-                filename = f'episode_{ep}.bin'
-
-            # Determine if we're resuming or starting fresh
-            mode = 'ab' if os.path.exists(filename) else 'wb'
-            start = os.path.getsize(filename) if mode == 'ab' else 0
-            if mode == 'ab':
-                headers['Range'] = f'bytes={start}-'
-
-            # Determine full file size
-            total = int(r.headers.get('content-length', 0)) + start
-
-            # Proceed if status is OK or partial content
-            if r.status_code in (200, 206):
-                with open(filename, mode) as f, tqdm.tqdm(
-                    desc=f'Downloading Episode {ep}',
-                    total=total,
-                    initial=start,
-                    unit='B',
-                    unit_scale=True,
-                    unit_divisor=1024,
-                    ncols=80
-                ) as bar:
-                    for chunk in r.iter_content(chunk_size=chunk_size):
-                        if chunk:
-                            f.write(chunk)
-                            bar.update(len(chunk))
+            if response.status_code == 403:
+                print("403 Forbidden: Check headers, token, or wait timing.")
                 return
-            else:
-                print(f'Unexpected status code: {r.status_code}')
-        except (ChunkedEncodingError, RequestException) as e:
-            print(f'Error during download: {e}')
+
+            if response.status_code not in (200, 206):
+                print(f"Unexpected status code: {response.status_code}")
+                return
+
+            # Extract filename from headers if not set
+            content_disposition = response.headers.get("content-disposition", "")
+            if "filename=" in content_disposition:
+                filename = content_disposition.split("filename=")[-1].strip('"')
+
+            if not filename:
+                filename = "video.mp4"
+
+            # Resume logic: calculate size of partially downloaded file
+            file_size = os.path.getsize(filename) if os.path.exists(filename) else 0
+            if file_size:
+                headers["Range"] = f"bytes={file_size}-"  # Add Range header for resuming
+            total_size = int(response.headers.get("content-length", 0)) + file_size
+
+            mode = "ab" if file_size else "wb"  # Append or write new
+            with open(filename, mode) as f, tqdm.tqdm(
+                total=total_size, initial=file_size, unit='B', unit_scale=True,
+                desc=f"Episode {ep}", ncols=80, unit_divisor=1024
+            ) as bar:
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    if chunk:
+                        f.write(chunk)
+                        bar.update(len(chunk))
+            return
+        except Exception as e:
+            print(f"Error during download: {e}")
             if attempt < retries:
-                print(f'Retrying... ({attempt}/{retries})')
-                time.sleep(5)
+                time.sleep(3)  # Wait and retry
             else:
-                print('Failed after multiple retries.')
-                break
+                print("Download failed.")
+                return
 
-# Main handler function
-def kwik_download(url: str, browser: str = 'firefox', dpath: str = os.getcwd(), chunk_size: int = 10*1024, ep=None, animename=None):
+
+def kwik_download(url, browser="firefox", dpath=os.getcwd(), chunk_size=1024 * 10, ep=None, animename=None):
     os.chdir(dpath)  # Change to download directory
-    posturl = url.replace('/f/', '/d/')  # Convert to POST submission URL
+    posturl = url.replace("/f/", "/d/")  # Build POST endpoint based on pattern
 
-    # Choose browser automation engine
-    if browser.lower() in ['chrome', 'google chrome', 'google']:
-        svc = ChromeService('/snap/bin/chromedriver')
-        opts = webdriver.ChromeOptions()
-        opts.add_argument('--headless')
-        driver = webdriver.Chrome(service=svc, options=opts)
-    elif browser.lower() in ['firefox', 'ff', 'ffox']:
-        svc = FirefoxService('/snap/bin/geckodriver')
-        opts = webdriver.FirefoxOptions()
-        opts.add_argument('--headless')
-        driver = webdriver.Firefox(service=svc, options=opts)
-    else:
-        print('Unsupported browser. Please report this issue at https://github.com/haxsysgit/autopahe/issues')
-        return
+    # Set up headless Firefox browser via Selenium
+    service = FirefoxService(executable_path="/snap/bin/geckodriver")
+    options = webdriver.FirefoxOptions()
+    options.add_argument("-headless")  # Run without GUI
+    driver = webdriver.Firefox(service=service, options=options)
+    driver.get(url)  # Open the kwik.si file page
 
-    # Load the webpage
-    driver.get(url)
-
-    # Wait for the form to load (token usually inside)
     try:
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, 'form')))
+        # Wait until the form appears (ensures JS executed)
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "form")))
+        time.sleep(5)  # Additional wait for countdowns to complete
+
+        # Parse the current page source to extract the form
+        soup = BeautifulSoup(driver.page_source, "lxml")
+        form = soup.find("form")
+        token = form.find("input", {"type": "hidden"})["value"]  # Extract CSRF token
     except Exception as e:
-        print(f'Error: Form not found on the page. {e}')
+        print("Could not find token:", e)
         driver.quit()
         return
 
-    # Extract form and token
-    soup = BeautifulSoup(driver.page_source, 'lxml')
-    form = soup.find('form')
-    if not form:
-        print('Error: Form not found on the page.')
-        driver.quit()
-        return
-
-    token = form.find('input', attrs={'type': 'hidden'})['value']
-    
-    # Collect cookies from the browser
-    cookies = driver.get_cookies()
-    cookie_string = ';'.join([c['name'] + '=' + c['value'] for c in cookies])
+    # Capture all cookies from the browser into the requests session
+    selenium_cookies = driver.get_cookies()
     driver.quit()
 
-    # Prepare POST request to submit form and get redirect
-    params = {'_token': token}
-    post_headers = {
-        'Host': urlparse(url).netloc,
-        'User-Agent': 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0',
-        'Accept': '*/*',
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Referer': url,
-        'Origin': f'{urlparse(url).scheme}://{urlparse(url).netloc}',
+    session = requests.Session()  # Persistent session for reuse
+    for cookie in selenium_cookies:
+        session.cookies.set(cookie['name'], cookie['value'], domain=cookie.get('domain', 'kwik.si'))
+
+    # Construct realistic headers (mimic real browser)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:138.0) Gecko/20100101 Firefox/138.0',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br, zstd',
+        'Referer': url,               # Crucial: refers back to original /f/ page
+        'Origin': 'https://kwik.si',  # Must match site
         'Connection': 'keep-alive',
-        'Cookie': cookie_string
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-Fetch-User': '?1',
+        'Priority': 'u=0, i',
+        'Content-Type': 'application/x-www-form-urlencoded',
+
+        # Extra headers that help evade bot detection
+        'Sec-Ch-Ua': '"Firefox";v="138", "Not-A.Brand";v="99"',
+        'Sec-Ch-Ua-Platform': '"Linux"',
+        'Sec-Ch-Ua-Mobile': '?0',
     }
 
-    # Send the POST request
-    response = requests.post(posturl, data=params, headers=post_headers, allow_redirects=False, timeout=30)
+    # Token included in form body
+    params = {"_token": token}
 
-    # If we receive a redirect, that's our file
-    if response.status_code in (301, 302) and 'Location' in response.headers:
-        download_url = response.headers['Location']
-        download_with_retries(download_url, url, animename, ep, chunk_size)
-    else:
-        print(f'Error: Expected redirect, got {response.status_code}')
+    # Call the actual download function
+    download_with_retries(session, posturl, params, headers, animename, ep, chunk_size)

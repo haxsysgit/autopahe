@@ -8,8 +8,9 @@ from bs4 import BeautifulSoup
 from kwikdown import kwik_download
 from manager import process_record,load_database,print_all_records,search_record
 from execution_tracker import log_execution_time, reset_run_count, get_execution_stats
-from multiprocessing import Pool, cpu_count
-import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
+import atexit
 
 ############################################## Selenium imports #################################################
 
@@ -28,6 +29,11 @@ CHROME_PATH = "/snap/bin/chromedriver"
 
 # Counter for unique Marionette ports
 _port_counter = 2828
+
+# Global browser pool for reuse
+_browser_pool = []
+_max_browsers = 3  # Limit concurrent browsers
+_pool_lock = None
 
 # Download path
 system_name = sys.platform.lower()
@@ -70,22 +76,25 @@ records = []
 def make_firefox_driver():
     """
     Return a headless Firefox WebDriver with an isolated profile & unique port.
+    Optimized with faster page load settings.
     """
-    # global _port_counter
     opts = webdriver.FirefoxOptions()
-    opts.add_argument("--headless")
+    # opts.add_argument("--headless")
+    
+    # Performance optimizations
+    opts.set_preference("browser.cache.disk.enable", False)
+    opts.set_preference("browser.cache.memory.enable", False)
+    opts.set_preference("browser.cache.offline.enable", False)
+    opts.set_preference("network.http.use-cache", False)
+    opts.set_preference("permissions.default.image", 2)  # Disable images
+    opts.set_preference("dom.ipc.plugins.enabled.libflashplayer.so", False)
+    opts.page_load_strategy = 'eager'  # Don't wait for all resources
 
     # Isolated clean profile
     profile_dir = tempfile.mkdtemp(prefix="fw_profile_")
     opts.profile = profile_dir
 
-    # Avoid using --no-remote/--new-instance (they often break in threads)
-    service = ff_service(executable_path=GECKO_PATH)
-
-    # service = ff_service(executable_path=GECKO_PATH, port=_port_counter)
-    # _port_counter += 1
-
-    # logging.info(f"Launching Firefox on port {service.port}")
+    service = ff_service(executable_path=GECKO_PATH, log_path=os.devnull)
 
     return webdriver.Firefox(service=service, options=opts)
 
@@ -93,27 +102,37 @@ def make_firefox_driver():
 
 
 def browser(choice="firefox"):
+    """Get or create a browser instance with pooling support."""
     chrome_guess = ["chrome", "Chrome", "google chrome", "google"]
-
     ff_guess = ["ff", "firefox", "ffgui", "ffox", "fire"]
 
     if choice.lower() in chrome_guess:
         chserv = chrome_service("/snap/bin/geckodriver")
         logging.info("Launching Chrome")
         driver = webdriver.Chrome(service=chserv)
-
         logging.info("Using Chrome browser")
+        return driver
 
     elif choice.lower() in ff_guess:
-
-
-        logging.info("Launching isolated headless Firefox")
-
+        logging.info("Launching optimized headless Firefox")
         return make_firefox_driver()
 
     else:
         logging.error("Unsupported browser choice")
         raise ValueError(f"Unsupported browser: {choice}")
+
+def cleanup_browsers():
+    """Cleanup function to close all browser instances."""
+    global _browser_pool
+    for driver in _browser_pool:
+        try:
+            driver.quit()
+        except:
+            pass
+    _browser_pool.clear()
+
+# Register cleanup on exit
+atexit.register(cleanup_browsers)
 
 
 
@@ -195,36 +214,65 @@ def data_report(data:dict,filepath = "autopahe_data.json",):
             dump(new_data,st,indent=4)
 
 
-def driver_output(url: str, driver=False, content=False, json=False, wait_time=10):
+# Request session with connection pooling
+_request_session = None
+
+def get_request_session():
+    """Get or create a persistent request session with connection pooling."""
+    global _request_session
+    if _request_session is None:
+        _request_session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=20,
+            pool_maxsize=20,
+            max_retries=3,
+            pool_block=False
+        )
+        _request_session.mount('http://', adapter)
+        _request_session.mount('https://', adapter)
+    return _request_session
+
+@lru_cache(maxsize=100)
+def cached_request(url):
+    """Cached GET request to avoid repeated API calls."""
+    session = get_request_session()
+    try:
+        response = session.get(url, timeout=10)
+        return response.content
+    except:
+        return None
+
+def driver_output(url: str, driver=False, content=False, json=False, wait_time=5):
     if driver: 
         # Initialize the browser
         driver_instance = browser()
         try:
             driver_instance.get(url)
+            # Extra wait for DDoS-Guard/CloudFlare challenges
+            time.sleep(wait_time)
         except Exception as e:
             # Log the error without exiting the program
             logging.error(f"Selenium failed to load the page: {e}")
             driver_instance.quit()
-            return None  # Return None to indicate failure but allow the program to continue
+            return None
 
-        # Refresh page to ensure it's up-to-date , Wait for the page to load
-        driver_instance.refresh();    driver_instance.implicitly_wait(wait_time)
+        # Wait for page elements
+        # driver_instance.refresh()
+        driver_instance.implicitly_wait(wait_time)
+        
 
         if content:
             # Get the page content (HTML)
             page_source = driver_instance.page_source
-            driver_instance.quit()
+            # driver_instance.quit()
             return page_source
 
         elif json:
             # Get the JSON content
             json_data = driver_instance.execute_script("return document.body.innerText;")
-            driver_instance.quit()
-            # print(url)
-            # print(json_data)
+            # driver_instance.quit()
 
             dict_data = parse_mailfunction_api(json_data)
-            # print(dict_data)
             if dict_data is None:
                 raise ValueError("Failed to parse malformed JSON.")
 
@@ -233,7 +281,7 @@ def driver_output(url: str, driver=False, content=False, json=False, wait_time=1
         # Log an error if invalid parameters were provided
         logging.error("Invalid arguments provided to driver_output function.")
         print("Use the 'content' argument to get page content or 'json' argument to get JSON response.")
-        return None  # Return None to indicate the invalid argument scenario
+        return None
     
     return driver
 
@@ -283,7 +331,7 @@ class Banners():
         - Episodes Available : {eps}
         - Anime Hompage : {anipage}
         - Year released : {year}
-        - Type of anime (TV or Movie) : {atype}
+        - Type of anime (TV , Movie , ONA or OVA) : {atype}
         - Cover image : {img}
         - Status : {status}
         
@@ -343,16 +391,16 @@ def lookup(arg):
     global search_response_dict
 
     # Search banner
-
     Banners.search(arg)
     n()
 
     # url pattern requested when anime is searched
-    animepahe_search_pattern = f'https://animepahe.ru/api?m=search&q={arg}'
+    animepahe_search_pattern = f'https://animepahe.si/api?m=search&q={arg}'
 
     try:
-
-        search_response = requests.get(animepahe_search_pattern).content
+        # Use cached request session
+        session = get_request_session()
+        search_response = session.get(animepahe_search_pattern, timeout=10).content
 
         #return if no anime found
         if not search_response:
@@ -362,12 +410,18 @@ def lookup(arg):
         
         # converting response json data to python dictionary for operation
         search_response_dict = loads(search_response)
+        
+        logging.debug(f"Direct API call succeeded. Found {len(search_response_dict.get('data', []))} results")
 
-    except:
-
-        search_response = driver_output(animepahe_search_pattern,driver=True,json=True, wait_time = 30)
-        # print(search_response)
-        search_response_dict = search_response
+    except Exception as e:
+        logging.warning(f"Direct API request failed ({e}), falling back to Selenium browser...")
+        search_response = driver_output(animepahe_search_pattern,driver=True,json=True, wait_time=30)
+        if search_response:
+            search_response_dict = search_response
+            logging.debug(f"Selenium fallback succeeded. Found {len(search_response_dict.get('data', []))} results")
+        else:
+            logging.error("Both direct API and Selenium failed to retrieve search results")
+            search_response_dict = {'data': []}
 
     # print(search_response)
 
@@ -378,6 +432,17 @@ def lookup(arg):
 
 
 
+    # Check if results exist
+    if not search_response_dict or 'data' not in search_response_dict or not search_response_dict['data']:
+        Banners.header()
+        logging.error("No results found. Please try a different search term.")
+        print("\n❌ No anime found matching your search.\n")
+        print("💡 Tips:")
+        print("   - Try different spelling or formatting")
+        print("   - Check if the anime name is correct")
+        print("   - Try searching with fewer keywords\n")
+        return None
+    
     resultlen = len(search_response_dict['data'])
     n()
     print(f'{resultlen} results were found  ---> ')
@@ -434,9 +499,10 @@ def index(arg):
 
 
     try:
-        jsonpage_dict = loads(requests.get(anime_url_format).content)
+        session = get_request_session()
+        jsonpage_dict = loads(session.get(anime_url_format, timeout=10).content)
     except:
-        jsonpage_dict = driver_output(anime_url_format,driver=True,json=True, wait_time = 30)
+        jsonpage_dict = driver_output(anime_url_format,driver=True,json=True, wait_time=10)
 
 
  
@@ -466,7 +532,7 @@ def about():
 
 
 
-def download(arg=1, download_file=True):
+def download(arg=1, download_file=True, res = "720"):
     """
     Downloads the specified episode of the anime by navigating through the webpage using Selenium 
     and extracting the download link.
@@ -490,11 +556,11 @@ def download(arg=1, download_file=True):
         # Open the stream page URL in the browser
         driver.get(stream_page_url)
 
-        # Set an implicit wait for elements to load before interacting with the page
-        driver.implicitly_wait(10)
+        # Reduced wait times for faster execution
+        driver.implicitly_wait(5)
 
-        # Pause briefly to ensure the page has time to load
-        time.sleep(15)
+        # Reduced sleep time - page loads faster with optimized settings
+        time.sleep(3)
 
         # Parse the page content into a BeautifulSoup object for easier scraping
         stream_page_soup = BeautifulSoup(driver.page_source, 'lxml')
@@ -502,22 +568,39 @@ def download(arg=1, download_file=True):
         # Find all the download links in the page using the specified class name
         dload = stream_page_soup.find_all('a', class_='dropdown-item', target="_blank")
 
-        # Use a list comprehension to filter out specific resolutions (e.g., 360p, 1080p, and English versions)
-        # The `stlink` is the string version of the link element. We check for matching resolutions with a regex.
-        linkpahe = [
-            (href := BeautifulSoup(stlink, 'html.parser').a['href'])  # Extract the actual download link
-            for link in dload if not (re.search(r'(360p|1080p|eng)', stlink := str(link)))  # Filter out unwanted links
-        ]
+        # Filters download links with resolution >= 720p and excludes 'eng' versions,
+        # then sorts them starting from 720p up to the highest resolution available.
+        linkpahe = sorted(
+            [
+                BeautifulSoup(str(link), 'html.parser').a['href']
+                for link in dload
+                if (
+                    (m := re.search(r'(\d{3,4})p', str(link))) and 
+                    int(m.group(1)) >= 720 and 
+                    'eng' not in str(link).lower()
+                )
+            ],
+            key=lambda url: int(re.search(r'(\d{3,4})p', url).group(1)) if re.search(r'(\d{3,4})p', url) else float('inf')
+        )
+
+
+        print(linkpahe)
 
         # If a valid download link is found, proceed with the next steps
         if not linkpahe:
             raise ValueError(f"No valid download link found for episode {arg}")
 
         # Navigate to the selected download link
-        driver.get(linkpahe[0])
+        res = str(res)
+        if res == "720":
+            driver.get(linkpahe[0])
+        elif res == '1080':
+            driver.get(linkpahe[-1])
+        else:
+            driver.get(linkpahe[1])
         
-        # Pause to allow the new page to load
-        time.sleep(10)
+        # Reduced wait time for kwik page
+        time.sleep(3)
 
         # Retrieve the page source of the new page (now the actual download page)
         kwik_page = driver.page_source
@@ -548,7 +631,7 @@ def download(arg=1, download_file=True):
     kwik = kwik_cx.find('a', class_='redirect')['href']
 
     # Print the found download link to the terminal
-    print(f"\nDownload link => {kwik}\n")
+    # print(f"\nEpisode {arg} Download link => {kwik}\n")
 
     if download_file:
         # Call the Banners.downloading method to display a download banner
@@ -564,10 +647,10 @@ def download(arg=1, download_file=True):
     # ========================================== Multi Download Utility ==========================================
 
     
-def multi_download(arg: str, download_file=True):
+def multi_download(arg: str, download_file=True, resolution="720", max_workers=2):
     """
-    Downloads multiple episodes sequentially using the standard download() function.
-    This is a primitive implementation with no multiprocessing, printing, or output.
+    Downloads multiple episodes in parallel using ThreadPoolExecutor.
+    Much faster than sequential downloads.
     """
     # Parse input like '2,3,5-7' into [2,3,5,6,7]
     eps = []
@@ -578,11 +661,26 @@ def multi_download(arg: str, download_file=True):
         elif part.isdigit():
             eps.append(int(part))
 
-    for ep in eps:
-        try:
-            download(arg=ep, download_file=download_file)
-        except Exception as e:
-            logging.error(f"Episode {ep} failed: {e}")
+    logging.info(f"Starting parallel download of {len(eps)} episodes with {max_workers} workers")
+    
+    # Use ThreadPoolExecutor for concurrent downloads
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {}
+        for i, ep in enumerate(eps):
+            # Small delay between launches to avoid port conflicts
+            if i > 0:
+                time.sleep(1)
+            future = executor.submit(download, arg=ep, download_file=download_file, res=str(resolution))
+            futures[future] = ep
+        
+        # Wait for all downloads to complete
+        for future in as_completed(futures):
+            ep = futures[future]
+            try:
+                future.result()
+                logging.info(f"Episode {ep} completed successfully")
+            except Exception as e:
+                logging.error(f"Episode {ep} failed: {e}")
 
 
 
@@ -659,6 +757,9 @@ def command_main(args):
     abtarg = args.about  # Flag for displaying anime information
     rarg = args.record  # Argument for interacting with records
     dtarg = args.execution_data  # New argument for execution stats by date
+    larg = args.link
+    mlarg = args.multilinks
+    parg = args.resolution
 
     # Reset the run count
     reset_run_count()
@@ -670,10 +771,16 @@ def command_main(args):
     # Search function
     if sarg:
         records.append(sarg)
-        lookup(sarg)
+        result = lookup(sarg)
+        if result is None:
+            logging.error("Search failed. Exiting.")
+            return
 
     # Index function
     if iarg is not None:
+        if not search_response_dict or 'data' not in search_response_dict or len(search_response_dict['data']) <= iarg:
+            logging.error(f"Invalid index {iarg}. Search returned no results or index out of range.")
+            return
         index(iarg)
         search_response_dict["data"][iarg]["anime_page"] = episode_page_format
         records.append(search_response_dict['data'][iarg])
@@ -688,17 +795,34 @@ def command_main(args):
         process_record(records, update=True)
         Banners.anime_info(animepicked, info)
 
+    
+
     # Single Download function
     if sdarg:
         records.append(sdarg)
+        download(sdarg,res=parg)
         process_record(records, update=True)
-        download(sdarg)
+
+    if larg:
+        records.append(larg)
+        download(larg , download_file=False,res=parg)
+        process_record(records, update=True)
+
 
     # Multi Download function
     if mdarg:
         records.append(mdarg)
-        multi_download(mdarg,download_file=True)
+        multi_download(mdarg,download_file=True,resolution=parg)
         process_record(records, update=True)
+
+    if mlarg:
+        records.append(mlarg)
+        multi_download(mlarg,download_file=False,resolution=parg)
+        process_record(records, update=True)
+
+    
+
+
 
     # Record argument
     if rarg:
@@ -749,14 +873,14 @@ def command_main(args):
         elif len(stats) > 1:
             for stat in stats:
                 # Convert total time from seconds to minutes
-                total_time_minutes = stats[stat]['total_time_mins']
+                total_time_minutes = round(stats[stat]['total_time_mins'],1)
 
-                total_time_hours = stats[stat]['total_time_hours']
+                total_time_hours = round(stats[stat]['total_time_hours'])
 
-                average_time_mins = stats[stat]['average_time_mins']
+                average_time_mins = round(stats[stat]['average_time_mins'])
 
-                average_time_hours = stats[stat]['average_time_hours']
-                
+                average_time_hours = round(stats[stat]['average_time_hours']) 
+                               
                 print(f"\n\nExecution stats for '{stat}' -->>")
 
                 print(f"\n1.) Total Runs: {stats[stat]['run_count']}")
@@ -788,7 +912,10 @@ def main():
     parser.add_argument('-i', '--index', type=int, help='Specify the index of the desired anime from the search results.')
     parser.add_argument('-d', '--single_download', type=int, help='Download a single episode of an anime.')
     parser.add_argument('-md', '--multi_download', help='Download multiple episodes of an anime.')
+    parser.add_argument('-l', '--link', help='Display the link to the kwik download page')
+    parser.add_argument('-ml', '--multilinks', help='Display the multiple links to the kwik download page')
     parser.add_argument('-a', '--about', help='Output an overview of the anime', action='store_true')
+    parser.add_argument('-p', '--resolution', type=str, default='720', help='Provides resolution option for downloads')
     parser.add_argument('-r', '--record', help='Interact with the records/database (view, [index], [keyword]).')
     
     # Adding help message for exec_data

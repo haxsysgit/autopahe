@@ -1,0 +1,13 @@
+[project]
+name = "autopahe"
+version = "0.1.0"
+description = "Download Anime Uninterrupted from animepahe"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4==4.12.3",
+    "lxml==5.3.0",
+    "requests==2.31.0",
+    "selenium==4.25.0",
+    "tqdm==4.66.5",
+]

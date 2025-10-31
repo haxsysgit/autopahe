@@ -10,24 +10,42 @@ from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait         # To wait for elements to load
 from selenium.webdriver.support import expected_conditions as EC
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
-# Download the file with retry support
-def download_with_retries(session, posturl, params, headers, filename, ep, chunk_size=1024, retries=5):
+
+def setup_session(retries=5):
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=retries,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["HEAD", "GET", "OPTIONS", "POST"]
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=100, pool_maxsize=100)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+def download_with_retries(session, posturl, params, headers, filename, ep, chunk_size=1024 * 300, retries=5):
     for attempt in range(1, retries + 1):
         try:
-            # Send POST request to download link with token and headers
+            # Check for partial file and set resume header BEFORE request
+            file_size = os.path.getsize(filename) if os.path.exists(filename) else 0
+            if file_size:
+                headers["Range"] = f"bytes={file_size}-"
+
+            # Send request
             response = session.post(posturl, data=params, headers=headers, stream=True, timeout=30)
-            # print(response.headers)
 
             if response.status_code == 403:
                 print("403 Forbidden: Check headers, token, or wait timing.")
                 return
-
             if response.status_code not in (200, 206):
                 print(f"Unexpected status code: {response.status_code}")
                 return
 
-            # Extract filename from headers if not set
+            # Extract filename if not provided
             content_disposition = response.headers.get("content-disposition", "")
             if "filename=" in content_disposition:
                 filename = content_disposition.split("filename=")[-1].strip('"')
@@ -35,46 +53,53 @@ def download_with_retries(session, posturl, params, headers, filename, ep, chunk
             if not filename:
                 filename = "video.mp4"
 
-            # Resume logic: calculate size of partially downloaded file
-            file_size = os.path.getsize(filename) if os.path.exists(filename) else 0
-            if file_size:
-                headers["Range"] = f"bytes={file_size}-"  # Add Range header for resuming
+            # Total size = server content + local file (for resume)
             total_size = int(response.headers.get("content-length", 0)) + file_size
+            mode = "ab" if file_size else "wb"
 
-            mode = "ab" if file_size else "wb"  # Append or write new
+            # Begin download with progress bar
             with open(filename, mode) as f, tqdm.tqdm(
-                total=total_size, initial=file_size, unit='B', unit_scale=True,
-                desc=f"Episode {ep}", ncols=80, unit_divisor=1024
+                total=total_size, initial=file_size, unit='B',
+                unit_scale=True, desc=f"Episode {ep}",
+                ncols=80, unit_divisor=1024
             ) as bar:
                 for chunk in response.iter_content(chunk_size=chunk_size):
                     if chunk:
                         f.write(chunk)
                         bar.update(len(chunk))
-            return
+            return  # Success
         except Exception as e:
-            print(f"Error during download: {e}")
+            print(f"Attempt {attempt}/{retries} failed: {e}")
             if attempt < retries:
-                time.sleep(3)  # Wait and retry
+                time.sleep(3)
             else:
-                print("Download failed.")
+                print("Download failed after all retries.")
                 return
 
 
-def kwik_download(url, browser="firefox", dpath=os.getcwd(), chunk_size=1024 * 10, ep=None, animename=None):
+
+def kwik_download(url, browser="firefox", dpath=os.getcwd(), chunk_size=1024 * 300, ep=None, animename=None):
     os.chdir(dpath)  # Change to download directory
     posturl = url.replace("/f/", "/d/")  # Build POST endpoint based on pattern
 
-    # Set up headless Firefox browser via Selenium
-    service = FirefoxService(executable_path="/snap/bin/geckodriver")
+    # Set up optimized headless Firefox browser via Selenium
+    service = FirefoxService(executable_path="/snap/bin/geckodriver", log_path=os.devnull)
     options = webdriver.FirefoxOptions()
     options.add_argument("-headless")  # Run without GUI
+    
+    # Performance optimizations
+    options.set_preference("browser.cache.disk.enable", False)
+    options.set_preference("browser.cache.memory.enable", False)
+    options.set_preference("permissions.default.image", 2)  # Disable images
+    options.page_load_strategy = 'eager'  # Don't wait for all resources
+    
     driver = webdriver.Firefox(service=service, options=options)
     driver.get(url)  # Open the kwik.si file page
 
     try:
         # Wait until the form appears (ensures JS executed)
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "form")))
-        time.sleep(5)  # Additional wait for countdowns to complete
+        WebDriverWait(driver, 8).until(EC.presence_of_element_located((By.TAG_NAME, "form")))
+        time.sleep(2)  # Reduced wait time - form loads faster with optimized settings
 
         # Parse the current page source to extract the form
         soup = BeautifulSoup(driver.page_source, "lxml")

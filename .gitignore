@@ -6,3 +6,8 @@ json_data/
 .venv/
 *.log
 trash.txt
+
+# Benchmark files
+benchmark.py
+OPTIMIZATION_CHANGES.md
+

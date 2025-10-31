@@ -17,7 +17,7 @@ if not os.path.exists(json_dir):
     os.mkdir(json_dir)
     
 
-DATA_FILE = os.path.join(cwd, "json_data/execution_data.py")
+DATA_FILE = os.path.join(cwd, "json_data/execution_data.json")
 
 
 # Function to log the execution time and run count

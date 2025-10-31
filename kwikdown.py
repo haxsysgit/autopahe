@@ -85,21 +85,25 @@ def kwik_download(url, browser="firefox", dpath=os.getcwd(), chunk_size=1024 * 3
     # Set up optimized headless Firefox browser via Selenium
     service = FirefoxService(executable_path="/snap/bin/geckodriver", log_path=os.devnull)
     options = webdriver.FirefoxOptions()
-    options.add_argument("-headless")  # Run without GUI
+    options.add_argument("--headless")  # Run without GUI
     
     # Performance optimizations
     options.set_preference("browser.cache.disk.enable", False)
     options.set_preference("browser.cache.memory.enable", False)
     options.set_preference("permissions.default.image", 2)  # Disable images
-    options.page_load_strategy = 'eager'  # Don't wait for all resources
+    options.page_load_strategy = 'normal'  # Changed to normal for stability
     
-    driver = webdriver.Firefox(service=service, options=options)
-    driver.get(url)  # Open the kwik.si file page
-
+    # Marionette stability
+    options.set_preference("marionette.port", 0)
+    
+    driver = None
     try:
+        driver = webdriver.Firefox(service=service, options=options)
+        driver.get(url)  # Open the kwik.si file page
+
         # Wait until the form appears (ensures JS executed)
-        WebDriverWait(driver, 8).until(EC.presence_of_element_located((By.TAG_NAME, "form")))
-        time.sleep(2)  # Reduced wait time - form loads faster with optimized settings
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "form")))
+        time.sleep(3)  # Wait for any countdowns
 
         # Parse the current page source to extract the form
         soup = BeautifulSoup(driver.page_source, "lxml")
@@ -107,7 +111,8 @@ def kwik_download(url, browser="firefox", dpath=os.getcwd(), chunk_size=1024 * 3
         token = form.find("input", {"type": "hidden"})["value"]  # Extract CSRF token
     except Exception as e:
         print("Could not find token:", e)
-        driver.quit()
+        if driver:
+            driver.quit()
         return
 
     # Capture all cookies from the browser into the requests session

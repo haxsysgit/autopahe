@@ -79,7 +79,7 @@ def make_firefox_driver():
     Optimized with faster page load settings.
     """
     opts = webdriver.FirefoxOptions()
-    # opts.add_argument("--headless")
+    opts.add_argument("--headless")
     
     # Performance optimizations
     opts.set_preference("browser.cache.disk.enable", False)
@@ -88,15 +88,30 @@ def make_firefox_driver():
     opts.set_preference("network.http.use-cache", False)
     opts.set_preference("permissions.default.image", 2)  # Disable images
     opts.set_preference("dom.ipc.plugins.enabled.libflashplayer.so", False)
-    opts.page_load_strategy = 'eager'  # Don't wait for all resources
+    opts.page_load_strategy = 'normal'  # Changed from 'eager' for stability
+    
+    # Marionette stability fixes
+    opts.set_preference("marionette.port", 0)  # Auto-select port
+    opts.set_preference("dom.disable_beforeunload", True)
 
     # Isolated clean profile
     profile_dir = tempfile.mkdtemp(prefix="fw_profile_")
     opts.profile = profile_dir
 
     service = ff_service(executable_path=GECKO_PATH, log_path=os.devnull)
-
-    return webdriver.Firefox(service=service, options=opts)
+    
+    try:
+        driver = webdriver.Firefox(service=service, options=opts)
+        return driver
+    except Exception as e:
+        logging.error(f"Failed to create Firefox driver: {e}")
+        # Cleanup temp profile on failure
+        try:
+            import shutil
+            shutil.rmtree(profile_dir, ignore_errors=True)
+        except:
+            pass
+        raise
 
  
 
@@ -244,46 +259,50 @@ def cached_request(url):
 
 def driver_output(url: str, driver=False, content=False, json=False, wait_time=5):
     if driver: 
-        # Initialize the browser
-        driver_instance = browser()
+        driver_instance = None
         try:
+            # Initialize the browser
+            driver_instance = browser()
             driver_instance.get(url)
             # Extra wait for DDoS-Guard/CloudFlare challenges
             time.sleep(wait_time)
+            
+            # Wait for page elements
+            driver_instance.implicitly_wait(wait_time)
+
+            if content:
+                # Get the page content (HTML)
+                page_source = driver_instance.page_source
+                driver_instance.quit()
+                return page_source
+
+            elif json:
+                # Get the JSON content
+                json_data = driver_instance.execute_script("return document.body.innerText;")
+                driver_instance.quit()
+
+                dict_data = parse_mailfunction_api(json_data)
+                if dict_data is None:
+                    raise ValueError("Failed to parse malformed JSON.")
+
+                return dict_data
+                
         except Exception as e:
-            # Log the error without exiting the program
+            # Log the error and clean up
             logging.error(f"Selenium failed to load the page: {e}")
-            driver_instance.quit()
+            if driver_instance:
+                try:
+                    driver_instance.quit()
+                except:
+                    pass
             return None
-
-        # Wait for page elements
-        # driver_instance.refresh()
-        driver_instance.implicitly_wait(wait_time)
-        
-
-        if content:
-            # Get the page content (HTML)
-            page_source = driver_instance.page_source
-            # driver_instance.quit()
-            return page_source
-
-        elif json:
-            # Get the JSON content
-            json_data = driver_instance.execute_script("return document.body.innerText;")
-            # driver_instance.quit()
-
-            dict_data = parse_mailfunction_api(json_data)
-            if dict_data is None:
-                raise ValueError("Failed to parse malformed JSON.")
-
-            return dict_data
     else:
         # Log an error if invalid parameters were provided
         logging.error("Invalid arguments provided to driver_output function.")
         print("Use the 'content' argument to get page content or 'json' argument to get JSON response.")
         return None
     
-    return driver
+    return None
 
 
 
@@ -647,10 +666,11 @@ def download(arg=1, download_file=True, res = "720"):
     # ========================================== Multi Download Utility ==========================================
 
     
-def multi_download(arg: str, download_file=True, resolution="720", max_workers=2):
+def multi_download(arg: str, download_file=True, resolution="720", max_workers=1):
     """
-    Downloads multiple episodes in parallel using ThreadPoolExecutor.
-    Much faster than sequential downloads.
+    Downloads multiple episodes using ThreadPoolExecutor.
+    Default is sequential (max_workers=1) for stability.
+    Increase max_workers for parallel downloads if your system can handle it.
     """
     # Parse input like '2,3,5-7' into [2,3,5,6,7]
     eps = []
@@ -661,24 +681,29 @@ def multi_download(arg: str, download_file=True, resolution="720", max_workers=2
         elif part.isdigit():
             eps.append(int(part))
 
-    logging.info(f"Starting parallel download of {len(eps)} episodes with {max_workers} workers")
+    if max_workers == 1:
+        logging.info(f"Starting sequential download of {len(eps)} episodes")
+    else:
+        logging.info(f"Starting parallel download of {len(eps)} episodes with {max_workers} workers")
     
-    # Use ThreadPoolExecutor for concurrent downloads
+    # Use ThreadPoolExecutor for downloads
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {}
         for i, ep in enumerate(eps):
-            # Small delay between launches to avoid port conflicts
-            if i > 0:
-                time.sleep(1)
+            # Small delay between launches to avoid port conflicts when parallel
+            if i > 0 and max_workers > 1:
+                time.sleep(2)
             future = executor.submit(download, arg=ep, download_file=download_file, res=str(resolution))
             futures[future] = ep
         
         # Wait for all downloads to complete
+        completed = 0
         for future in as_completed(futures):
             ep = futures[future]
             try:
                 future.result()
-                logging.info(f"Episode {ep} completed successfully")
+                completed += 1
+                logging.info(f"Episode {ep} completed successfully ({completed}/{len(eps)})")
             except Exception as e:
                 logging.error(f"Episode {ep} failed: {e}")
 

@@ -1,5 +1,6 @@
 import json
 import os
+import csv
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 json_dir = os.path.join(cwd, "json_data")  # Full path to "json_data"
@@ -39,6 +40,21 @@ def get_next_index(database):
     """
     # Find the maximum index from existing keys or default to 0 if the database is empty
     return max([int(key) for key in database.keys()] or [0]) + 1
+
+def _find_index(database, key_or_title):
+    """Resolve a record identifier which may be an index (str/int) or title."""
+    # Direct index
+    if isinstance(key_or_title, int) or (isinstance(key_or_title, str) and key_or_title.isdigit()):
+        key = str(int(key_or_title))
+        if key in database:
+            return key
+        return None
+    # By title
+    t = str(key_or_title).strip().lower()
+    for k, v in database.items():
+        if v.get("title", "").lower() == t:
+            return k
+    return None
 
 def update_entry(record, database=None):
     """
@@ -191,6 +207,141 @@ def process_record(record, update=False):
     else:
         print(f"\nAdding new record with title '{title}'.")
         add_new_record(record, database)
+
+def delete_record(key_or_title):
+    """Delete a record by index or exact title."""
+    db = load_database()
+    idx = _find_index(db, key_or_title)
+    if idx is None:
+        print("Record not found.")
+        return False
+    removed = db.pop(idx)
+    save_database(db)
+    print(f"Deleted: {removed.get('title')}")
+    return True
+
+def update_progress(key_or_title, current_episode):
+    """Update current episode progress and recalculates status."""
+    db = load_database()
+    idx = _find_index(db, key_or_title)
+    if idx is None:
+        print("Record not found.")
+        return False
+    try:
+        ce = int(current_episode)
+    except Exception:
+        print("Invalid episode number")
+        return False
+    db[idx]["current_episode"] = ce
+    max_ep = db[idx].get("max_episode") or 0
+    if ce <= 0:
+        db[idx]["status"] = "Not Started Watching"
+    elif ce < max_ep:
+        db[idx]["status"] = f"Watching Episode {ce}"
+    else:
+        db[idx]["status"] = "Completed"
+    save_database(db)
+    print(f"Updated progress: {db[idx]['title']} -> {ce}")
+    return True
+
+def rate_record(key_or_title, rating):
+    """Set a rating 0-10."""
+    db = load_database()
+    idx = _find_index(db, key_or_title)
+    if idx is None:
+        print("Record not found.")
+        return False
+    try:
+        r = float(rating)
+    except Exception:
+        print("Invalid rating")
+        return False
+    r = max(0.0, min(10.0, r))
+    db[idx]["rating"] = r
+    save_database(db)
+    print(f"Rated {db[idx]['title']} -> {r}")
+    return True
+
+def rename_title(key_or_title, new_title):
+    db = load_database()
+    idx = _find_index(db, key_or_title)
+    if idx is None:
+        print("Record not found.")
+        return False
+    db[idx]["title"] = str(new_title)
+    save_database(db)
+    print("Renamed.")
+    return True
+
+def set_keyword(key_or_title, keyword):
+    db = load_database()
+    idx = _find_index(db, key_or_title)
+    if idx is None:
+        print("Record not found.")
+        return False
+    db[idx]["keyword"] = str(keyword)
+    save_database(db)
+    print("Keyword updated.")
+    return True
+
+def list_by_status(status):
+    db = load_database()
+    s = status.lower()
+    out = {k: v for k, v in db.items() if s in str(v.get("status", "")).lower()}
+    print(json.dumps(out, indent=4))
+    return out
+
+def export_records(path, fmt="json"):
+    db = load_database()
+    fmt = fmt.lower()
+    if fmt == "json":
+        with open(path, 'w') as f:
+            json.dump(db, f, indent=4)
+        print(f"Exported to {path}")
+        return True
+    if fmt == "csv":
+        # Flatten reasonable fields
+        fields = [
+            "index", "title", "keyword", "type", "status", "current_episode",
+            "max_episode", "year_aired", "rating", "Main Page", "cover_photo"
+        ]
+        with open(path, 'w', newline='') as f:
+            w = csv.DictWriter(f, fieldnames=fields)
+            w.writeheader()
+            for k, v in db.items():
+                row = {"index": k}
+                row.update({
+                    "title": v.get("title"),
+                    "keyword": v.get("keyword"),
+                    "type": v.get("type"),
+                    "status": v.get("status"),
+                    "current_episode": v.get("current_episode"),
+                    "max_episode": v.get("max_episode"),
+                    "year_aired": v.get("year_aired"),
+                    "rating": v.get("rating"),
+                    "Main Page": v.get("Main Page"),
+                    "cover_photo": v.get("cover_photo"),
+                })
+                w.writerow(row)
+        print(f"Exported to {path}")
+        return True
+    print("Unsupported format (use json or csv)")
+    return False
+
+def import_records(path):
+    db = load_database()
+    with open(path, 'r') as f:
+        incoming = json.load(f)
+    # Merge; if key collision, find next index
+    for k, v in incoming.items():
+        if k in db:
+            nk = str(get_next_index(db))
+            db[nk] = v
+        else:
+            db[k] = v
+    save_database(db)
+    print("Imported records.")
+    return True
 
 def search_record(query):
     """

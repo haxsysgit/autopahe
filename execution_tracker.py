@@ -2,6 +2,7 @@
 import json
 import os
 import time
+import re
 from datetime import datetime, timedelta
 
 # Initialize counters and timings
@@ -157,6 +158,30 @@ def get_execution_stats(date_input):
     today = datetime.now().date()
 
     # Handle different date inputs
+    if date_input.lower() == "all":
+        # Return entire dataset
+        return data if data else None
+
+    m = re.match(r"^from\s+(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})$", date_input.strip(), re.IGNORECASE)
+    if m:
+        start_s, end_s = m.groups()
+        try:
+            start_d = datetime.strptime(start_s, date_format).date()
+            end_d = datetime.strptime(end_s, date_format).date()
+        except Exception:
+            print("Invalid date range format. Use: from YYYY-MM-DD to YYYY-MM-DD")
+            return None
+        if start_d > end_d:
+            start_d, end_d = end_d, start_d
+        stats = {}
+        d = start_d
+        while d <= end_d:
+            k = d.strftime(date_format)
+            if k in data:
+                stats[k] = data[k]
+            d += timedelta(days=1)
+        return stats if stats else None
+
     if date_input.lower() == "today":
         stats={}
         date_key = today.strftime(date_format)

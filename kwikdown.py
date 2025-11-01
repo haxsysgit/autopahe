@@ -45,11 +45,10 @@ def download_with_retries(session, posturl, params, headers, filename, ep, chunk
                 print(f"Unexpected status code: {response.status_code}")
                 return
 
-            # Extract filename if not provided
+            # Extract filename (prefer server-provided name)
             content_disposition = response.headers.get("content-disposition", "")
             if "filename=" in content_disposition:
                 filename = content_disposition.split("filename=")[-1].strip('"')
-
             if not filename:
                 filename = "video.mp4"
 
@@ -76,10 +75,9 @@ def download_with_retries(session, posturl, params, headers, filename, ep, chunk
                 print("Download failed after all retries.")
                 return
 
-
-
 def kwik_download(url, browser="firefox", dpath=os.getcwd(), chunk_size=1024 * 300, ep=None, animename=None):
-    os.chdir(dpath)  # Change to download directory
+    os.chdir(dpath)
+
     posturl = url.replace("/f/", "/d/")  # Build POST endpoint based on pattern
 
     # Set up optimized headless Firefox browser via Selenium

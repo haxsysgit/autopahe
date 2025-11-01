@@ -1,0 +1,427 @@
+================================================================================
+                    AutoPahe Configuration System
+                        Documentation & Usage
+================================================================================
+
+OVERVIEW
+--------
+The configuration system allows you to set default values for common options
+(browser, resolution, workers, download directory, auto-sorting) in an INI 
+file instead of specifying them every time on the command line.
+
+CLI arguments always override config file values.
+
+
+CONFIGURATION FILE LOCATIONS
+-----------------------------
+The application searches for a config file in the following order:
+
+1. Path specified via --config flag
+2. ~/.config/autopahe/config.ini
+3. ~/.autopahe.ini
+4. ./autopahe.ini (current working directory)
+
+The first file found will be used. If none exist, default values are used.
+
+
+WRITING A SAMPLE CONFIG
+------------------------
+Generate a sample config file with all available options and comments:
+
+    python3 auto_pahe.py --write-config
+
+This writes to: ~/.config/autopahe/config.ini
+
+Write to a custom location:
+
+    python3 auto_pahe.py --write-config ./my_config.ini
+    python3 auto_pahe.py --write-config ~/.autopahe.ini
+
+
+USING A SPECIFIC CONFIG
+------------------------
+Load config from a custom path:
+
+    python3 auto_pahe.py --config ./my_config.ini -s "Naruto" -i 0 -d 1
+
+
+CONFIGURATION OPTIONS
+---------------------
+All options go under the [defaults] section:
+
+[defaults]
+# Default browser: firefox or chrome
+browser = firefox
+
+# Default resolution: 480, 720, 1080
+resolution = 720
+
+# Default workers for multi-download (use >1 with caution)
+workers = 1
+
+# Optional download directory override (leave empty to use OS default Downloads)
+# Example: /home/you/Downloads
+# On Windows: C:\Users\you\Downloads
+# On macOS: /Users/you/Downloads
+# On Linux: /home/you/Downloads
+download_dir = 
+
+# Optional: automatically sort after downloads (not enabled by default)
+sort_on_complete = false
+
+# Optional: preferred sort mode when enabled: all | rename | organize
+sort_mode = 
+
+# Optional: sort path override (leave empty to use download_dir or OS default)
+sort_path = 
+
+
+DETAILED OPTION EXPLANATIONS
+-----------------------------
+
+1. browser
+   - Values: firefox | chrome
+   - Default: firefox
+   - Example: browser = firefox
+   - CLI override: -b/--browser
+
+2. resolution
+   - Values: 480 | 720 | 1080
+   - Default: 720
+   - Selects preferred video quality. Script will pick the best available
+     match for the requested resolution.
+   - Example: resolution = 1080
+   - CLI override: -p/--resolution
+
+3. workers
+   - Values: integer >= 1
+   - Default: 1 (sequential downloads)
+   - Number of parallel workers for multi-episode downloads.
+   - WARNING: Use >1 with caution; may cause instability with DDoS-Guard.
+   - Example: workers = 2
+   - CLI override: -w/--workers
+
+4. download_dir
+   - Values: absolute path to a directory
+   - Default: empty (uses OS default Downloads folder)
+   - Override where downloaded files are saved.
+   - Example: download_dir = /home/hax/Videos/Anime
+   - No CLI override (uses OS defaults unless config is set)
+
+5. sort_on_complete
+   - Values: true | false | yes | no | 1 | 0
+   - Default: false
+   - When enabled, automatically runs sorting (pahesort) after downloads.
+   - Requires sort_mode to be set.
+   - Example: sort_on_complete = true
+
+6. sort_mode
+   - Values: all | rename | organize
+   - Default: empty
+   - Used when sort_on_complete is true.
+   - Options:
+     * all      - gather AnimePahe files, rename, and organize into folders
+     * rename   - only rename files
+     * organize - only organize files into folders
+   - Example: sort_mode = all
+
+7. sort_path
+   - Values: absolute path to a directory
+   - Default: empty (uses download_dir or OS default Downloads)
+   - Override where sorting operations are performed.
+   - Example: sort_path = /home/hax/Downloads
+
+
+USAGE EXAMPLES
+--------------
+
+Example 1: Basic config for 1080p downloads
+--------------------------------------------
+File: ~/.autopahe.ini
+
+[defaults]
+browser = firefox
+resolution = 1080
+workers = 1
+download_dir = /home/hax/Videos/Anime
+
+
+Usage:
+    python3 auto_pahe.py -s "Bleach" -i 0 -md "1-5"
+    # Downloads to /home/hax/Videos/Anime in 1080p, sequential
+
+
+Example 2: Parallel downloads with auto-sort
+---------------------------------------------
+File: ~/.config/autopahe/config.ini
+
+[defaults]
+browser = firefox
+resolution = 720
+workers = 2
+download_dir = /home/hax/Downloads
+sort_on_complete = true
+sort_mode = all
+sort_path = /home/hax/Downloads
+
+
+Usage:
+    python3 auto_pahe.py -s "One Piece" -i 0 -md "1-10"
+    # Downloads 2 episodes at a time to ~/Downloads
+    # After downloads complete, auto-runs: rename + organize
+
+
+Example 3: Override config values with CLI
+-------------------------------------------
+File: ~/.autopahe.ini
+
+[defaults]
+resolution = 720
+workers = 1
+
+
+Usage:
+    python3 auto_pahe.py -s "Naruto" -i 0 -md "1-3" -p 1080 -w 3
+    # Config says 720p and 1 worker
+    # CLI overrides to 1080p and 3 workers
+
+
+Example 4: Separate configs for different use cases
+----------------------------------------------------
+Create multiple config files:
+
+    ~/configs/autopahe_fast.ini    (workers=3, resolution=720)
+    ~/configs/autopahe_quality.ini (workers=1, resolution=1080)
+
+Use them as needed:
+
+    python3 auto_pahe.py --config ~/configs/autopahe_fast.ini -s "Naruto" -i 0 -md "1-10"
+    python3 auto_pahe.py --config ~/configs/autopahe_quality.ini -s "Bleach" -i 0 -md "1-5"
+
+
+FULL COMMAND LINE REFERENCE
+----------------------------
+
+Search and download:
+  -s, --search TEXT             Search for an anime by name
+  -i, --index INT               Select anime from search results by index
+  -d, --single_download INT     Download a single episode
+  -md, --multi_download TEXT    Download multiple episodes (e.g., "1,3,5-8")
+  -l, --link                    Display the kwik download page link
+  -ml, --multilinks             Display multiple download page links
+
+Options:
+  -b, --browser TEXT            Browser choice (firefox|chrome)
+  -p, --resolution TEXT         Preferred resolution (480|720|1080)
+  -w, --workers INT             Parallel workers for multi-download
+  -a, --about                   Display anime overview
+
+Records management:
+  -r, --record TEXT             Basic record access (view, index, keyword)
+  -R, --records ...             Robust record management (see below)
+
+Sorting:
+  --sort {all|rename|organize}  Sort downloaded files
+  --sort-path PATH              Directory to sort (default: Downloads)
+  --sort-dry-run                Simulate sorting without changes
+
+Execution stats:
+  -dt, --execution_data TEXT    Execution stats for date/period
+  --summary TEXT                Execution stats + records summary
+
+Configuration:
+  --config PATH                 Load config from specified file
+  --write-config [PATH]         Write sample config and exit
+
+
+RECORDS MANAGEMENT WITH -R
+---------------------------
+
+View all records:
+    python3 auto_pahe.py -R view
+
+Search records:
+    python3 auto_pahe.py -R search "naruto"
+
+Update progress (by index or title):
+    python3 auto_pahe.py -R progress 3 27
+    python3 auto_pahe.py -R progress "Naruto" 27
+
+Rate an anime (0-10):
+    python3 auto_pahe.py -R rate 3 8.5
+    python3 auto_pahe.py -R rate "Naruto" 9.0
+
+Rename a record:
+    python3 auto_pahe.py -R rename 3 "Naruto Shippuden"
+
+Set keyword:
+    python3 auto_pahe.py -R set-keyword 3 naruto
+
+Delete a record:
+    python3 auto_pahe.py -R delete 3
+    python3 auto_pahe.py -R delete "Naruto"
+
+List by status:
+    python3 auto_pahe.py -R list-status completed
+    python3 auto_pahe.py -R list-status watching
+
+Export records:
+    python3 auto_pahe.py -R export records.json json
+    python3 auto_pahe.py -R export records.csv csv
+
+Import records:
+    python3 auto_pahe.py -R import records.json
+
+
+SORTING EXAMPLES
+----------------
+
+Perform all steps (gather AnimePahe files, rename, organize):
+    python3 auto_pahe.py --sort all --sort-path ~/Downloads
+
+Rename only (dry run to preview):
+    python3 auto_pahe.py --sort rename --sort-path ~/Downloads --sort-dry-run
+
+Organize only:
+    python3 auto_pahe.py --sort organize --sort-path ~/Downloads
+
+Note: Sorting is integrated from pahesort.py. You no longer need to run
+pahesort.py separately; use --sort in the main app.
+
+
+EXECUTION STATS EXAMPLES
+-------------------------
+
+Today's stats:
+    python3 auto_pahe.py -dt "today"
+
+Yesterday:
+    python3 auto_pahe.py -dt "yesterday"
+
+Last 3 days:
+    python3 auto_pahe.py -dt "last 3 days"
+
+Last week:
+    python3 auto_pahe.py -dt "last week"
+
+This week:
+    python3 auto_pahe.py -dt "this week"
+
+All time (using --summary):
+    python3 auto_pahe.py --summary "all"
+
+Date range (using --summary):
+    python3 auto_pahe.py --summary "from 2025-10-01 to 2025-10-31"
+
+Summary with records count:
+    python3 auto_pahe.py --summary "today"
+    # Shows execution stats + records summary (total, completed, watching, not_started)
+
+
+TYPICAL WORKFLOWS
+-----------------
+
+Workflow 1: Quick download with defaults
+    python3 auto_pahe.py -s "Bleach" -i 0 -md "1-5"
+
+Workflow 2: Download and sort immediately
+    python3 auto_pahe.py -s "Bleach" -i 0 -md "1-5"
+    python3 auto_pahe.py --sort all
+
+Workflow 3: Download with auto-sort (via config)
+    # Set sort_on_complete=true in config
+    python3 auto_pahe.py -s "Bleach" -i 0 -md "1-5"
+    # Sorting runs automatically after download completes
+
+Workflow 4: Manage records
+    python3 auto_pahe.py -R view
+    python3 auto_pahe.py -R progress "Bleach" 15
+    python3 auto_pahe.py -R rate "Bleach" 9.0
+    python3 auto_pahe.py -R list-status watching
+
+Workflow 5: Check usage stats
+    python3 auto_pahe.py --summary "this week"
+    python3 auto_pahe.py --summary "all"
+
+
+TROUBLESHOOTING
+---------------
+
+Q: Config file not being loaded?
+A: Check the search order. Use --config to specify exact path.
+   Verify the file has [defaults] section header.
+
+Q: CLI arguments not overriding config?
+A: This is a bug. CLI arguments should always win. Report issue.
+
+Q: Auto-sort not working?
+A: Ensure sort_on_complete=true AND sort_mode is set (all|rename|organize).
+   Auto-sort only runs after actual downloads (not with -l or -ml).
+
+Q: Workers > 1 causing errors?
+A: Reduce to 1. Parallel downloads can trigger DDoS-Guard protection.
+   Use sequential downloads (workers=1) for maximum stability.
+
+Q: Where are my downloads?
+A: Default: OS Downloads folder (~/Downloads on Linux/macOS).
+   Override via config: download_dir = /path/to/folder
+
+Q: How to reset to defaults?
+A: Delete or rename your config file. App will use built-in defaults.
+
+
+TECHNICAL NOTES
+---------------
+
+1. Configuration loading order:
+   - Pre-parse --config flag
+   - Load config file (or use defaults if not found)
+   - Parse remaining CLI arguments with config-driven defaults
+   - CLI arguments override config values
+
+2. Auto-sort trigger:
+   - Only runs when sort_on_complete=true in config
+   - Only runs after actual downloads (not link display)
+   - Uses sort_mode from config (or 'all' if not specified)
+   - Uses sort_path from config, fallback to download_dir, fallback to OS Downloads
+
+3. DDoS-Guard bypass:
+   - Still uses browser refresh + implicitly_wait mechanism
+   - Configuration does not change bypass behavior
+   - Avoid aggressive Firefox prefs that might break site JS
+
+4. Config module location:
+   - ap_core/config.py
+   - Functions: load_app_config(), write_sample_config(), sample_config_text()
+
+5. Global state:
+   - APP_CONFIG dict is stashed in main() and accessed in command_main()
+   - DOWNLOADS path is overridden in command_main() if download_dir is set
+
+
+IMPLEMENTATION SUMMARY
+----------------------
+
+Files added/modified:
+- ap_core/config.py (NEW): Configuration loading and sample generation
+- auto_pahe.py (MODIFIED): Integrated config system with pre-parser and defaults
+- execution_tracker.py (ENHANCED): Added 'all' and 'from X to Y' support
+
+New command line flags:
+- --config PATH
+- --write-config [PATH]
+
+Config keys:
+- browser, resolution, workers
+- download_dir, sort_on_complete, sort_mode, sort_path
+
+Behavior:
+- CLI args always override config
+- Config provides defaults for common operations
+- Auto-sort optional and configurable
+- Backward compatible (all existing commands work unchanged)
+
+
+================================================================================
+                            End of Documentation
+================================================================================

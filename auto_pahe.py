@@ -5,8 +5,25 @@ from pathlib import Path
 import logging
 from json import loads,load,dump,dumps,JSONDecodeError
 from bs4 import BeautifulSoup
+from ap_core.banners import Banners, n
+from ap_core.browser import browser, driver_output, get_request_session, cached_request, cleanup_browsers
+from ap_core.config import load_app_config, write_sample_config, sample_config_text
 from kwikdown import kwik_download
-from manager import process_record,load_database,print_all_records,search_record
+from manager import (
+    process_record,
+    load_database,
+    print_all_records,
+    search_record,
+    delete_record,
+    update_progress,
+    rate_record,
+    rename_title,
+    set_keyword,
+    list_by_status,
+    export_records,
+    import_records,
+)
+from pahesort import rename_anime, organize_anime, gather_anime
 from execution_tracker import log_execution_time, reset_run_count, get_execution_stats
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
@@ -71,82 +88,7 @@ records = []
 
 ############################################ BROWSER HANDLING ##########################################################
 
-
-
-def make_firefox_driver():
-    """
-    Return a headless Firefox WebDriver with an isolated profile & unique port.
-    Optimized with faster page load settings.
-    """
-    opts = webdriver.FirefoxOptions()
-    opts.add_argument("--headless")
-    
-    # Performance optimizations
-    opts.set_preference("browser.cache.disk.enable", False)
-    opts.set_preference("browser.cache.memory.enable", False)
-    opts.set_preference("browser.cache.offline.enable", False)
-    opts.set_preference("network.http.use-cache", False)
-    opts.set_preference("permissions.default.image", 2)  # Disable images
-    opts.set_preference("dom.ipc.plugins.enabled.libflashplayer.so", False)
-    opts.page_load_strategy = 'normal'  # Changed from 'eager' for stability
-    
-    # Marionette stability fixes
-    opts.set_preference("marionette.port", 0)  # Auto-select port
-    opts.set_preference("dom.disable_beforeunload", True)
-
-    # Isolated clean profile
-    profile_dir = tempfile.mkdtemp(prefix="fw_profile_")
-    opts.profile = profile_dir
-
-    service = ff_service(executable_path=GECKO_PATH, log_path=os.devnull)
-    
-    try:
-        driver = webdriver.Firefox(service=service, options=opts)
-        return driver
-    except Exception as e:
-        logging.error(f"Failed to create Firefox driver: {e}")
-        # Cleanup temp profile on failure
-        try:
-            import shutil
-            shutil.rmtree(profile_dir, ignore_errors=True)
-        except:
-            pass
-        raise
-
- 
-
-
-def browser(choice="firefox"):
-    """Get or create a browser instance with pooling support."""
-    chrome_guess = ["chrome", "Chrome", "google chrome", "google"]
-    ff_guess = ["ff", "firefox", "ffgui", "ffox", "fire"]
-
-    if choice.lower() in chrome_guess:
-        chserv = chrome_service("/snap/bin/geckodriver")
-        logging.info("Launching Chrome")
-        driver = webdriver.Chrome(service=chserv)
-        logging.info("Using Chrome browser")
-        return driver
-
-    elif choice.lower() in ff_guess:
-        logging.info("Launching optimized headless Firefox")
-        return make_firefox_driver()
-
-    else:
-        logging.error("Unsupported browser choice")
-        raise ValueError(f"Unsupported browser: {choice}")
-
-def cleanup_browsers():
-    """Cleanup function to close all browser instances."""
-    global _browser_pool
-    for driver in _browser_pool:
-        try:
-            driver.quit()
-        except:
-            pass
-    _browser_pool.clear()
-
-# Register cleanup on exit
+# Register cleanup on exit for imported cleanup function
 atexit.register(cleanup_browsers)
 
 
@@ -228,164 +170,14 @@ def data_report(data:dict,filepath = "autopahe_data.json",):
         with open(filepath,"w") as st:
             dump(new_data,st,indent=4)
 
-
-# Request session with connection pooling
-_request_session = None
-
-def get_request_session():
-    """Get or create a persistent request session with connection pooling."""
-    global _request_session
-    if _request_session is None:
-        _request_session = requests.Session()
-        adapter = requests.adapters.HTTPAdapter(
-            pool_connections=20,
-            pool_maxsize=20,
-            max_retries=3,
-            pool_block=False
-        )
-        _request_session.mount('http://', adapter)
-        _request_session.mount('https://', adapter)
-    return _request_session
-
-@lru_cache(maxsize=100)
-def cached_request(url):
-    """Cached GET request to avoid repeated API calls."""
-    session = get_request_session()
-    try:
-        response = session.get(url, timeout=10)
-        return response.content
-    except:
-        return None
-
-def driver_output(url: str, driver=False, content=False, json=False, wait_time=5):
-    if driver: 
-        driver_instance = None
-        try:
-            # Initialize the browser
-            driver_instance = browser()
-            driver_instance.get(url)
-            # Extra wait for DDoS-Guard/CloudFlare challenges
-            time.sleep(wait_time)
-            
-            # Wait for page elements
-            driver_instance.implicitly_wait(wait_time)
-
-            if content:
-                # Get the page content (HTML)
-                page_source = driver_instance.page_source
-                driver_instance.quit()
-                return page_source
-
-            elif json:
-                # Get the JSON content
-                json_data = driver_instance.execute_script("return document.body.innerText;")
-                driver_instance.quit()
-
-                dict_data = parse_mailfunction_api(json_data)
-                if dict_data is None:
-                    raise ValueError("Failed to parse malformed JSON.")
-
-                return dict_data
-                
-        except Exception as e:
-            # Log the error and clean up
-            logging.error(f"Selenium failed to load the page: {e}")
-            if driver_instance:
-                try:
-                    driver_instance.quit()
-                except:
-                    pass
-            return None
-    else:
-        # Log an error if invalid parameters were provided
-        logging.error("Invalid arguments provided to driver_output function.")
-        print("Use the 'content' argument to get page content or 'json' argument to get JSON response.")
-        return None
-    
-    return None
-
-
-
-    
-
-        
-
 current_system_os = str(sys.platform) #get current os
 
-
-class Banners():
-    def header():
-        os.system('cls' if current_system_os.lower() == 'windows' else 'clear' )
-        print('''
-              
-             db    8    8 88888 .d88b.      888b.    db    8   8 8888 
-            dPYb   8    8   8   8P  Y8 ____ 8  .8   dPYb   8www8 8www 
-           dPwwYb  8b..d8   8   8b  d8      8wwP'  dPwwYb  8   8 8    
-          dP    Yb `Y88P'   8   `Y88P'      8     dP    Yb 8   8 8888 
-              
-              ''')
-        
-                
-    def search(anime = None):
-        print(f'''
-        ----------------------------------------
-            Searching for {anime}..
-        ----------------------------------------
-        ''')
-
-    def downloading(anime = None,eps = None):
-        print(f'''
-        ----------------------------------------
-            Downloading episode {eps} of {anime}..
-        ----------------------------------------
-        ''')
-        
-    def select(anime,eps = None,anipage = None ,year = None,
-               atype = None,img = None,status = None):
-        print(f'''
-        ----------------------------------------
-                Selected  {anime}..
-        ----------------------------------------
-        
-        - Episodes Available : {eps}
-        - Anime Hompage : {anipage}
-        - Year released : {year}
-        - Type of anime (TV , Movie , ONA or OVA) : {atype}
-        - Cover image : {img}
-        - Status : {status}
-        
-        ''')
-    def anime_info(anim = None , abt = None):
-        print(f'''
-        ----------------------------------------
-            ABOUT {anim}
-        ----------------------------------------
-        
-        {abt}
-        
-        ''')
-    def i_info(summary = None):
-        print(f'''
-        ----------------------------------------
-            Summary on Anime
-        ----------------------------------------
-        
-        {summary}
-        
-        ''')
-        
 
 # Banner Header
 Banners.header()
 
 
-def n():
-    print()
-
-
-n()
-
-# ============================ The requests argument handler function===============================
+# ... (rest of the code remains the same)
 
 
 # # TEXT wrap decorator
@@ -417,9 +209,8 @@ def lookup(arg):
     animepahe_search_pattern = f'https://animepahe.si/api?m=search&q={arg}'
 
     try:
-        # Use cached request session
-        session = get_request_session()
-        search_response = session.get(animepahe_search_pattern, timeout=10).content
+        # Use cached GET to speed up repeats
+        search_response = cached_request(animepahe_search_pattern)
 
         #return if no anime found
         if not search_response:
@@ -521,7 +312,7 @@ def index(arg):
         session = get_request_session()
         jsonpage_dict = loads(session.get(anime_url_format, timeout=10).content)
     except:
-        jsonpage_dict = driver_output(anime_url_format,driver=True,json=True, wait_time=10)
+        jsonpage_dict = driver_output(anime_url_format,driver=True,json=True, wait_time=20)
 
 
  
@@ -575,11 +366,11 @@ def download(arg=1, download_file=True, res = "720"):
         # Open the stream page URL in the browser
         driver.get(stream_page_url)
 
-        # Reduced wait times for faster execution
-        driver.implicitly_wait(5)
+        # Set an implicit wait for elements to load before interacting with the page
+        driver.implicitly_wait(10)
 
-        # Reduced sleep time - page loads faster with optimized settings
-        time.sleep(3)
+        # Pause briefly to ensure the page has time to load
+        time.sleep(15)
 
         # Parse the page content into a BeautifulSoup object for easier scraping
         stream_page_soup = BeautifulSoup(driver.page_source, 'lxml')
@@ -618,8 +409,8 @@ def download(arg=1, download_file=True, res = "720"):
         else:
             driver.get(linkpahe[1])
         
-        # Reduced wait time for kwik page
-        time.sleep(3)
+        # Pause to allow the new page to load
+        time.sleep(10)
 
         # Retrieve the page source of the new page (now the actual download page)
         kwik_page = driver.page_source
@@ -785,6 +576,21 @@ def command_main(args):
     larg = args.link
     mlarg = args.multilinks
     parg = args.resolution
+    rcmds = args.records
+    sort_cmd = args.sort
+    sort_path = args.sort_path
+    sort_dry = args.sort_dry_run
+    summary_arg = args.summary
+
+    # Apply config-driven overrides
+    global DOWNLOADS
+    try:
+        cfg = APP_CONFIG
+    except NameError:
+        cfg = None
+
+    if cfg and cfg.get('download_dir'):
+        DOWNLOADS = Path(cfg['download_dir'])
 
     # Reset the run count
     reset_run_count()
@@ -822,11 +628,13 @@ def command_main(args):
 
     
 
+    did_download = False
     # Single Download function
     if sdarg:
         records.append(sdarg)
         download(sdarg,res=parg)
         process_record(records, update=True)
+        did_download = True
 
     if larg:
         records.append(larg)
@@ -837,13 +645,15 @@ def command_main(args):
     # Multi Download function
     if mdarg:
         records.append(mdarg)
-        multi_download(mdarg,download_file=True,resolution=parg)
+        multi_download(mdarg,download_file=True,resolution=parg, max_workers=args.workers)
         process_record(records, update=True)
+        did_download = True
 
     if mlarg:
         records.append(mlarg)
-        multi_download(mlarg,download_file=False,resolution=parg)
+        multi_download(mlarg,download_file=False,resolution=parg, max_workers=args.workers)
         process_record(records, update=True)
+        did_download = True
 
     
 
@@ -868,6 +678,61 @@ def command_main(args):
                 print(dumps(results, indent=4))
             else:
                 print("No matching records found.")
+
+    # Robust records management
+    if rcmds:
+        try:
+            cmd = rcmds[0].lower()
+            args_rest = rcmds[1:]
+            if cmd == "view":
+                print_all_records()
+            elif cmd == "search" and len(args_rest) >= 1:
+                print(dumps(search_record(args_rest[0]), indent=4))
+            elif cmd == "delete" and len(args_rest) >= 1:
+                delete_record(args_rest[0])
+            elif cmd == "progress" and len(args_rest) >= 2:
+                update_progress(args_rest[0], args_rest[1])
+            elif cmd == "rate" and len(args_rest) >= 2:
+                rate_record(args_rest[0], args_rest[1])
+            elif cmd == "rename" and len(args_rest) >= 2:
+                rename_title(args_rest[0], " ".join(args_rest[1:]))
+            elif cmd == "set-keyword" and len(args_rest) >= 2:
+                set_keyword(args_rest[0], " ".join(args_rest[1:]))
+            elif cmd == "list-status" and len(args_rest) >= 1:
+                list_by_status(" ".join(args_rest))
+            elif cmd == "export" and len(args_rest) >= 1:
+                out = args_rest[0]
+                fmt = args_rest[1] if len(args_rest) >= 2 else "json"
+                export_records(out, fmt)
+            elif cmd == "import" and len(args_rest) >= 1:
+                import_records(args_rest[0])
+            else:
+                print("Invalid -R usage. See --help for examples.")
+        except Exception as e:
+            print(f"Records error: {e}")
+
+    # Sorting integration (pahesort)
+    if sort_cmd:
+        base_path = sort_path if sort_path else str(DOWNLOADS)
+        if sort_cmd == 'all':
+            rename_anime(base_path, animepahe=True, dry_run=sort_dry)
+            organize_anime(base_path, animepahe=True, dry_run=sort_dry)
+        elif sort_cmd == 'rename':
+            rename_anime(base_path, dry_run=sort_dry)
+        elif sort_cmd == 'organize':
+            organize_anime(base_path, dry_run=sort_dry)
+
+    # Config-driven auto sort after downloads
+    if cfg and did_download and str(cfg.get('sort_on_complete', 'false')).lower() in {'1','true','yes','on'}:
+        mode = (cfg.get('sort_mode') or 'all').lower()
+        base_path = cfg.get('sort_path') or cfg.get('download_dir') or str(DOWNLOADS)
+        if mode == 'rename':
+            rename_anime(base_path, dry_run=False)
+        elif mode == 'organize':
+            organize_anime(base_path, dry_run=False)
+        else:
+            rename_anime(base_path, animepahe=True, dry_run=False)
+            organize_anime(base_path, animepahe=True, dry_run=False)
 
     # Date argument to retrieve execution stats
     if dtarg:
@@ -918,6 +783,18 @@ def command_main(args):
         else:
             print(f"\n\nNo execution data found for '{dtarg}'.")
 
+    # Summary combining execution stats and records
+    if summary_arg:
+        stats = get_execution_stats(summary_arg)
+        if stats:
+            print(dumps(stats, indent=4))
+        db = load_database()
+        total = len(db)
+        completed = sum(1 for v in db.values() if 'Completed' in str(v.get('status','')))
+        watching = sum(1 for v in db.values() if 'Watching' in str(v.get('status','')))
+        not_started = sum(1 for v in db.values() if 'Not Started' in str(v.get('status','')))
+        print(f"\nRecords summary: total={total}, completed={completed}, watching={watching}, not_started={not_started}")
+
 
 
 # Main entry point for the script that processes arguments and triggers the appropriate actions
@@ -930,9 +807,30 @@ def main():
     # Record the start time of the execution
     start_time = time.perf_counter()
 
+    # Pre-parse config flags
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument('--config', help='Path to a config INI file')
+    pre.add_argument('--write-config', nargs='?', const='', help='Write a sample config to the given path (or default) and exit')
+    pre_args, remaining = pre.parse_known_args()
+
+    # Load configuration
+    cfg, cfg_path = load_app_config(pre_args.config)
+
+    # Handle write-config
+    if pre_args.write_config is not None:
+        default_path = str(Path.home() / '.config' / 'autopahe' / 'config.ini')
+        target = pre_args.write_config or default_path
+        written = write_sample_config(target)
+        print(f"Sample config written to: {written}")
+        return
+
+    # Stash config globally for command_main
+    global APP_CONFIG
+    APP_CONFIG = cfg
+
     # Argument parser setup to handle command-line inputs
     parser = argparse.ArgumentParser()
-    parser.add_argument('-b', '--browser', help='Select the desired browser (chrome or firefox). Default is chrome.')
+    parser.add_argument('-b', '--browser', default=cfg.get('browser','firefox'), help='Select the desired browser (chrome or firefox).')
     parser.add_argument('-s', '--search', type=str, help='Search for an anime by name.')
     parser.add_argument('-i', '--index', type=int, help='Specify the index of the desired anime from the search results.')
     parser.add_argument('-d', '--single_download', type=int, help='Download a single episode of an anime.')
@@ -940,8 +838,17 @@ def main():
     parser.add_argument('-l', '--link', help='Display the link to the kwik download page')
     parser.add_argument('-ml', '--multilinks', help='Display the multiple links to the kwik download page')
     parser.add_argument('-a', '--about', help='Output an overview of the anime', action='store_true')
-    parser.add_argument('-p', '--resolution', type=str, default='720', help='Provides resolution option for downloads')
+    parser.add_argument('-p', '--resolution', type=str, default=str(cfg.get('resolution','720')), help='Provides resolution option for downloads')
+    parser.add_argument('-w', '--workers', type=int, default=int(cfg.get('workers','1')), help='Number of parallel workers for multi-episode downloads (use >1 with caution)')
     parser.add_argument('-r', '--record', help='Interact with the records/database (view, [index], [keyword]).')
+    parser.add_argument('-R', '--records', nargs='+', help='Robust records management. Examples: -R view | -R search naruto | -R delete 3 | -R progress 3 27 | -R rate 3 8.5 | -R rename 3 "New Title" | -R set-keyword 3 naruto | -R list-status completed | -R export out.json json | -R import in.json')
+    parser.add_argument('--sort', choices=['all','rename','organize'], help='Sort downloaded files (integrates pahesort).')
+    parser.add_argument('--sort-path', help='Path to sort; defaults to Downloads')
+    parser.add_argument('--sort-dry-run', action='store_true', help='Dry-run sorting (no changes)')
+    parser.add_argument('--summary', help='Show execution stats and records summary; accepts same formats as --execution_data')
+    # Repeat config flags for help
+    parser.add_argument('--config', help='Path to a config INI file')
+    parser.add_argument('--write-config', nargs='?', const='', help='Write a sample config to the given path (or default) and exit')
     
     # Adding help message for exec_data
     parser.add_argument(
@@ -955,7 +862,7 @@ def main():
     )
 
     # Parse the command-line arguments
-    args = parser.parse_args()
+    args = parser.parse_args(remaining)
 
     # If any arguments are provided, process them using command_main
     if any(vars(args).values()):

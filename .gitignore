@@ -5,9 +5,5 @@ json_data/
 .vscode/
 .venv/
 *.log
-trash.txt
-OPTIMIZATION_SUMMARY.md
-STATUS_REPORT.md
-trash.txt
-DDOS_GUARD_FIX.md
+Docs/
 *.lock

@@ -12,7 +12,7 @@ from ap_core.cache import cache_get, cache_set, cache_clear, get_cache_stats
 from ap_core.notifications import notify_download_complete, notify_download_failed
 from ap_core.cookies import clear_cookies
 from kwikdown import kwik_download
-from manager import (
+from features.manager import (
     process_record,
     load_database,
     print_all_records,
@@ -26,8 +26,8 @@ from manager import (
     export_records,
     import_records,
 )
-from pahesort import rename_anime, organize_anime, gather_anime
-from execution_tracker import log_execution_time, reset_run_count, get_execution_stats
+from features.pahesort import rename_anime, organize_anime, gather_anime
+from features.execution_tracker import log_execution_time, reset_run_count, get_execution_stats
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 import atexit

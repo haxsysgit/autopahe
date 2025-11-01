@@ -6,118 +6,509 @@
 [![OpenIssues](https://img.shields.io/github/issues/haxsysgit/autopahe?color=important)](https://github.com/haxsysgit/autopahe/issues)
 <!--LineBreak-->
 [![Windows](https://img.shields.io/badge/Windows-white?style=flat-square&logo=windows&logoColor=blue)](https://github.com/haxsysgit/autopahe/)
-[![Ubuntu](https://img.shields.io/badge/Ubuntu-white?style=flat-square&logo=ubuntu&logoColor=E95420)](https://github.com/haxsysgit/autopahe/)
+[![macOS](https://img.shields.io/badge/macOS-white?style=flat-square&logo=apple&logoColor=black)](https://github.com/haxsysgit/autopahe/)
+[![Linux](https://img.shields.io/badge/Linux-white?style=flat-square&logo=linux&logoColor=black)](https://github.com/haxsysgit/autopahe/)
 <!-- Badges -->
-# Autopahe
-This is a Python script that can be used to search and download anime episodes from [animepahe](https://animepahe.com/). It uses the `requests`, `beautifulsoup4`, and `selenium` libraries to interact with the website and scrape relevant data.
 
-## Requirements
-- Python3
-- Any of the main web browser(Chrome,firefox,brave, e.t.c)
+# AutoPahe
 
-## Script dependencies
-- Selenium
-- BeautifulSoup4
-- requests
-- webdriver-manager
-- tqdm
+> **A powerful, cross-platform anime downloader for [AnimePahe](https://animepahe.com/) with advanced features**
 
-## Getting Started
-1. Make sure you have Python installed in your system
-2. Install all dependencies using `pip install -r requirements.txt`
-3. Wait for pip to install all required dependencies. Enjoy the script :)
-4. Navigate to the project directory and Run `python3 autopahe/auto_pahe.py`
+Automatic anime search, download, and management with support for parallel downloads, desktop notifications, smart caching, filtering, and comprehensive record tracking. Fully cross-platform (Windows, macOS, Linux).
 
-## Usage
-- Syntax: `auto_pahe.py -<optional arguments>`
-- To run the script, execute `python3 auto_pahe.py`
+## ✨ Key Features
 
-<!-- ![autopahe](https://user-images.githubusercontent.com/56473062/120795797-922a3b80-c557-11eb-8328-26cfb39f4187.png) -->
+- 🔍 **Smart Search** with year and status filters
+- 📦 **Batch/Season Downloads** - Download entire seasons with one command
+- 🚀 **Parallel Downloads** - Speed up with multi-threaded downloads
+- 🔔 **Desktop Notifications** - Get notified when downloads complete (Windows/macOS/Linux)
+- 💾 **Smart Caching** - Faster repeat searches with automatic API caching
+- 📊 **Progress Tracking** - Visual progress bars for multi-episode downloads
+- 🗂️ **Record Management** - Track watching progress, ratings, and status
+- ⚙️ **Configuration System** - Save your preferences in a config file
+- 🎯 **Auto-Sorting** - Automatically organize downloaded files
+- 🌐 **Cross-Platform** - Works on Windows, macOS, and Linux
+- 📝 **Detailed Logging** - Verbose and quiet modes available
+- 🍪 **Session Persistence** - Reduced DDoS-Guard friction with cookie caching
 
-## Features
-- Search for an anime.
-- Select anime from search result.
-- Select episodes to download.
-- Downloads are made using inbuilt-dlr (default).
-- Inbuilt-dlr finds and resumes incomplete downloads by default.
+## 📋 Requirements
 
-- **Episode Selection Options:**
-  <!-- - `0` : downloads all the episodes of the selected anime. -->
-  - i : downloads episode i.
-    - eg:- `1` : downloads episode 1, `5` downloads episode 5 and so on.
-    
-  - x-y : downloads episodes from x to y. 
-    - eg:- `3-9` : downloads episodes 3 to 9 (3 and 9 inclusive)
-    
-  - In case of multiple options, each options must be seperated by a `,`
-  - Example: `1, 3, 6-11` : downloads episodes 1,3,6,7,8,9,10,11
+### System Requirements
+- **Python 3.8+**
+- **Web Browser**: Firefox or Chrome/Chromium
+- **WebDriver**: geckodriver (Firefox) or chromedriver (Chrome)
 
-## Images
-![Search Utility Example](imgs/img1_top.png)
-![other interaction](imgs/img2_middle.png)
-![Finished Downloads](imgs/img3_last.png)
-
-
-
-## Command line features
-To use the script, run it in your terminal using the following command:
-
-```shell
-python auto_pahe.py [-h] [-b BROWSER] [-s SEARCH] [-sh SEARCH_HIDDEN] [-i INDEX] [-sd SINGLE_DOWNLOAD] [-md MULTI_DOWNLOAD_OPTIMIZED] [-mdv MULTI_DOWNLOAD_VERBOSE] [-a ABOUT]
+### Python Dependencies
+```bash
+pip install selenium beautifulsoup4 requests tqdm lxml
 ```
 
+### WebDriver Installation
 
-Here are the available options:
+**Linux (Ubuntu/Debian):**
+```bash
+# Firefox (geckodriver)
+sudo apt install firefox-geckodriver
 
-- `-h`, `--help`: show the help message and exit
-- `-s`, `--search`: search for an anime using a keyword. The script will display a list of matching results.
-- `-sh`, `--search_hidden`: search for an anime using its name and index. This option is less verbose than the regular search.
-- `-i`, `--index`: choose an anime from the search results by its index.
-- `-sd`, `--single_download`: download a single episode of an anime by its number.
-- `-md`, `--multi_download_optimized`: download multiple episodes of an anime at once using a faster, optimized method. Specify a comma-separated string of episode numbers to download.
-- `-a`, `--about`: display an overview of the chosen anime.
-- `-r`, `--record`:Interact with the records/database (view, [index], [keyword]).
-  
-
-## Example Usage
-
-Here are some example commands to run the script:
-
-To search for an anime
-```shell
-# To search for an anime
-python3 auto_pahe.py -s "One piece"
-```
-To select an anime from the search result
-```shell
-# To select an anime from the search result
-python3 auto_pahe.py -s "One piece" -i 1
-```
-To download an episode in the selected anime
-```shell
-# To download an episode in the selected anime
-python3 auto_pahe.py -s "One piece" -i 0 -d 1
+# Chrome (chromedriver)
+sudo apt install chromium-chromedriver
 ```
 
+**macOS (Homebrew):**
+```bash
+# Firefox
+brew install geckodriver
+
+# Chrome
+brew install chromedriver
+```
+
+**Windows:**
+- Download [geckodriver](https://github.com/mozilla/geckodriver/releases) or [chromedriver](https://chromedriver.chromium.org/downloads)
+- Add to PATH or place in project directory
+
+## 🚀 Quick Start
+
+### Installation
+
+1. **Clone the repository:**
+```bash
+git clone https://github.com/haxsysgit/autopahe.git
+cd autopahe
+```
+
+2. **Install dependencies:**
+```bash
+pip install -r requirements.txt
+```
+
+3. **Install WebDriver** (see requirements above)
+
+4. **Run the script:**
+```bash
+python3 auto_pahe.py --help
+```
+
+### First Use Example
+```bash
+# Search for an anime
+python3 auto_pahe.py -s "Naruto"
+
+# Select and download episode 1
+python3 auto_pahe.py -s "Naruto" -i 0 -d 1
+
+# Download multiple episodes
+python3 auto_pahe.py -s "Naruto" -i 0 -md "1-5"
+```
+
+## 📖 Usage
+
+### Basic Commands
+
+```bash
+# Search for anime
+python3 auto_pahe.py -s "Anime Name"
+
+# Search with filters
+python3 auto_pahe.py -s "Naruto" --year 2007 --status "Finished"
+
+# Select anime from results (index 0 = first result)
+python3 auto_pahe.py -s "Naruto" -i 0
+
+# Download single episode
+python3 auto_pahe.py -s "Naruto" -i 0 -d 1
+
+# Download multiple episodes
+python3 auto_pahe.py -s "Naruto" -i 0 -md "1-5"
+python3 auto_pahe.py -s "Naruto" -i 0 -md "1,3,5-8,10"
+
+# Download entire season (12-13 episodes)
+python3 auto_pahe.py -s "Naruto" -i 0 --season 1
+
+# Parallel downloads (use with caution)
+python3 auto_pahe.py -s "Naruto" -i 0 -md "1-10" -w 2
+
+# With desktop notifications
+python3 auto_pahe.py -s "Naruto" -i 0 -md "1-5" --notify
+```
+
+### Advanced Features
+
+#### 📊 Records Management
+```bash
+# View all records
+python3 auto_pahe.py -R view
+
+# Search records
+python3 auto_pahe.py -R search "naruto"
+
+# Update progress
+python3 auto_pahe.py -R progress "Naruto" 27
+
+# Rate anime
+python3 auto_pahe.py -R rate "Naruto" 9.5
+
+# Export records
+python3 auto_pahe.py -R export backup.json json
+python3 auto_pahe.py -R export records.csv csv
+
+# Import records
+python3 auto_pahe.py -R import backup.json
+
+# Delete record
+python3 auto_pahe.py -R delete "Naruto"
+
+# List by status
+python3 auto_pahe.py -R list-status completed
+```
+
+#### 🗂️ File Sorting
+```bash
+# Sort downloaded files
+python3 auto_pahe.py --sort all --sort-path ~/Downloads
+
+# Dry run (preview changes)
+python3 auto_pahe.py --sort all --sort-dry-run
+
+# Rename only
+python3 auto_pahe.py --sort rename
+
+# Organize into folders
+python3 auto_pahe.py --sort organize
+```
+
+#### 💾 Cache Management
+```bash
+# View cache statistics
+python3 auto_pahe.py --cache stats
+
+# Clear cache and cookies
+python3 auto_pahe.py --cache clear
+```
+
+#### 📈 Execution Statistics
+```bash
+# Today's stats
+python3 auto_pahe.py -dt "today"
+
+# This week
+python3 auto_pahe.py --summary "this week"
+
+# All time
+python3 auto_pahe.py --summary "all"
+
+# Date range
+python3 auto_pahe.py --summary "from 2025-11-01 to 2025-11-30"
+```
+
+## 💡 Example Workflows
+
+### Basic Workflow
+```bash
+# 1. Search
+python3 auto_pahe.py -s "One Piece"
+
+# 2. Select (index 0 = first result)
+python3 auto_pahe.py -s "One Piece" -i 0
+
+# 3. Download episode 1
+python3 auto_pahe.py -s "One Piece" -i 0 -d 1
+```
+
+### Advanced Workflow
+```bash
+# Search with filters
+python3 auto_pahe.py -s "Naruto" --year 2007 --status "Finished Airing"
+
+# Download season 1 with notifications and parallel downloads
+python3 auto_pahe.py -s "Naruto" -i 0 --season 1 -w 2 --notify
+
+# Auto-sort after download (if configured)
+# Files automatically organized into folders
+```
+
+### Record Management Workflow
+```bash
+# After downloading, update your records
+python3 auto_pahe.py -R progress "Naruto" 12
+python3 auto_pahe.py -R rate "Naruto" 9.0
+
+# Check what you're watching
+python3 auto_pahe.py -R list-status "watching"
+
+# Export for backup
+python3 auto_pahe.py -R export ~/anime_backup.json json
+```
+
+## 🎯 Complete Command Reference
+
+### Search & Download
+| Flag | Description |
+|------|-------------|
+| `-s, --search TEXT` | Search for anime by name |
+| `-i, --index INT` | Select anime from search results |
+| `-d, --single_download INT` | Download single episode |
+| `-md, --multi_download TEXT` | Download multiple episodes (e.g., "1-5,7,10-12") |
+| `-l, --link` | Display download link (no download) |
+| `-ml, --multilinks` | Display multiple download links |
+| `-a, --about` | Show anime overview |
+
+### Options
+| Flag | Description |
+|------|-------------|
+| `-b, --browser TEXT` | Browser choice (firefox\|chrome) |
+| `-p, --resolution TEXT` | Preferred resolution (480\|720\|1080) |
+| `-w, --workers INT` | Parallel workers for downloads (default: 1) |
+
+### 🔍 Search Filters (NEW)
+| Flag | Description |
+|------|-------------|
+| `--year INT` | Filter search results by release year |
+| `--status TEXT` | Filter search results by status |
+
+### 📦 Batch Downloads (NEW)
+| Flag | Description |
+|------|-------------|
+| `--season INT` | Download entire season (e.g., --season 1 = eps 1-12) |
+
+### 🔔 Notifications (NEW)
+| Flag | Description |
+|------|-------------|
+| `--notify` | Enable desktop notifications on completion |
+
+### 📊 Records Management
+| Flag | Description |
+|------|-------------|
+| `-r, --record TEXT` | Basic record access (view, index, keyword) |
+| `-R, --records ...` | Advanced management (see subcommands below) |
+
+**-R Subcommands:**
+- `view` - List all records
+- `search <query>` - Search records
+- `delete <id\|title>` - Delete record
+- `progress <id\|title> <episode>` - Update progress
+- `rate <id\|title> <0-10>` - Set rating
+- `rename <id\|title> <new_title>` - Rename
+- `set-keyword <id\|title> <keyword>` - Update keyword
+- `list-status <status>` - Filter by status
+- `export <path> [json\|csv]` - Export records
+- `import <path>` - Import records
+
+### 🗂️ File Sorting
+| Flag | Description |
+|------|-------------|
+| `--sort {all\|rename\|organize}` | Sort downloaded files |
+| `--sort-path PATH` | Directory to sort (default: Downloads) |
+| `--sort-dry-run` | Preview changes without applying |
+
+### 💾 Cache Management (NEW)
+| Flag | Description |
+|------|-------------|
+| `--cache {clear\|stats}` | Manage disk cache and cookies |
+
+### 📈 Statistics
+| Flag | Description |
+|------|-------------|
+| `-dt, --execution_data TEXT` | Execution stats for periods |
+| `--summary TEXT` | Stats + records summary |
+
+### 📝 Logging (NEW)
+| Flag | Description |
+|------|-------------|
+| `--verbose` | Enable DEBUG logging (detailed) |
+| `--quiet` | Enable WARNING logging (minimal) |
+
+### ⚙️ Configuration
+| Flag | Description |
+|------|-------------|
+| `--config PATH` | Load configuration from file |
+| `--write-config [PATH]` | Generate sample config file |
+
+## ⚙️ Configuration
+
+Create a config file to save your preferences:
+
+```bash
+# Generate sample config
+python3 auto_pahe.py --write-config
+
+# Edit ~/.config/autopahe/config.ini
+```
+
+**Sample Configuration:**
+```ini
+[defaults]
+# Browser: firefox or chrome
+browser = firefox
+
+# Resolution: 480, 720, 1080
+resolution = 1080
+
+# Workers for parallel downloads (1 = sequential)
+workers = 2
+
+# Custom download directory (optional)
+download_dir = /home/user/Videos/Anime
+
+# Auto-sort after downloads
+sort_on_complete = true
+sort_mode = all
+
+# Custom sort directory (optional)
+sort_path = 
+```
+
+Config is loaded automatically from:
+1. `~/.config/autopahe/config.ini`
+2. `~/.autopahe.ini`
+3. `./autopahe.ini`
+
+Or specify custom location: `--config /path/to/config.ini`
+
+## 🚀 Performance Features
+
+### Smart Caching
+- **API Response Caching**: 6-hour cache for faster repeat searches
+- **Cookie Persistence**: 24-hour session cookies reduce DDoS-Guard challenges
+- **Auto-cleanup**: Old cache entries removed automatically
+
+### Parallel Downloads
+- Download multiple episodes simultaneously with `-w/--workers`
+- Safe staggering prevents port conflicts
+- **Warning**: May trigger DDoS-Guard protection. Use `-w 1` for stability.
+
+### Progress Tracking
+- Visual progress bars for multi-episode downloads (requires `tqdm`)
+- Real-time completion status
+- Failed episode tracking
+
+## 🔔 Desktop Notifications
+
+Get notified when downloads complete or fail:
+
+**Linux:** Uses `notify-send` (libnotify)
+```bash
+sudo apt install libnotify-bin  # Ubuntu/Debian
+```
+
+**macOS:** Uses AppleScript (built-in)
+
+**Windows:** Uses PowerShell toast notifications (built-in)
+
+Enable with `--notify` flag.
+
+## 🗂️ File Organization
+
+### Automatic Sorting
+Integrates `pahesort` functionality:
+- **Rename**: Clean up AnimePahe filenames
+- **Organize**: Group episodes into anime folders
+- **Auto-sort**: Enable in config for automatic organization
+
+### Manual Sorting
+```bash
+# Preview changes
+python3 auto_pahe.py --sort all --sort-dry-run
+
+# Apply sorting
+python3 auto_pahe.py --sort all --sort-path ~/Downloads
+```
+
+## 📝 Logging
+
+Control output verbosity:
+
+```bash
+# Normal logging (INFO)
+python3 auto_pahe.py -s "Naruto" -i 0 -d 1
+
+# Verbose logging (DEBUG) - shows cache hits, API calls, etc.
+python3 auto_pahe.py -s "Naruto" -i 0 -d 1 --verbose
+
+# Quiet logging (WARNING) - errors only
+python3 auto_pahe.py -s "Naruto" -i 0 -d 1 --quiet
+```
+
+Logs saved to `autopahe.log` in current directory.
+
+## 🌐 Cross-Platform Support
+
+### Windows
+- ✅ Full support with Firefox or Chrome
+- ✅ Desktop notifications via PowerShell
+- ✅ Automatic driver detection
+- 📝 Install drivers to PATH or project directory
+
+### macOS  
+- ✅ Full support with Firefox or Chrome
+- ✅ Desktop notifications via AppleScript
+- ✅ Homebrew driver installation
+- 📝 Use `brew install geckodriver` or `chromedriver`
+
+### Linux
+- ✅ Full support on all distros
+- ✅ Desktop notifications via notify-send
+- ✅ Package manager driver installation
+- 📝 Tested on Ubuntu, Debian, Fedora, Arch
+
+## 📚 Documentation
+
+Detailed documentation in the repository:
+
+- **ALL_PHASES_DOCUMENTATION.txt** - Complete feature guide
+- **CONFIG_DOCUMENTATION.txt** - Configuration system details  
+- **TESTING_GUIDE.txt** - Comprehensive testing procedures
+- **PHASE2_CHANGES_SUMMARY.txt** - Implementation changelog
+
+## ⚠️ Important Notes
+
+### DDoS-Guard Protection
+- AnimePahe uses DDoS-Guard protection
+- Script includes bypass mechanism (refresh + implicit wait)
+- **Parallel downloads** may trigger protection - use cautiously
+- **Persistent cookies** help reduce challenges
+- If blocked, wait a few minutes and try again
+
+### Download Quality
+- Default: 720p (configurable)
+- Available: 480p, 720p, 1080p
+- Script selects best available quality if preferred not available
+
+### Resume Support
+- Partial downloads automatically resumed
+- Uses HTTP Range headers
+- Safe to interrupt and restart
+
+## 🤝 Contributing
+
+Contributions welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
+5. Submit a pull request
+
+## ⚖️ License
+
+See [license.md](license.md) for details.
+
+## 🙏 Credits
+
+Created by [haxsys](https://github.com/haxsysgit)
+
+Built with:
+- [AnimePahe](https://animepahe.com/) - Anime source
+- [Selenium](https://www.selenium.dev/) - Browser automation
+- [BeautifulSoup](https://www.crummy.com/software/BeautifulSoup/) - HTML parsing
+- [Requests](https://requests.readthedocs.io/) - HTTP library
 
 
-- **Downloading and Quality :**
-  - Files are downloaded to your Default downloads directory.
-  - Downloads are taken care of by the inbuilt downloader on default.
-  - Currently the download quality priority is only 720p
-    <!-- - ie, downloader first checks for 720p video, if 720p is not available checks for 1080p and so on. -->
+## 📞 Support
 
-## Notes
-- you need a browser to be installed for this script to work (since the script uses selenium for some of its functions).
-- This script is a work under progress and therefore may lack some features, please bear with it, and consider contributing if you have any fixes or improvements :relaxed:. 
+- **Issues**: [GitHub Issues](https://github.com/haxsysgit/autopahe/issues)
+- **Questions**: Open a discussion or issue
+- **Updates**: Watch the repository for new releases
 
-- **In Windows** the webdriver if found to misbehave if the script is forced to exit using `ctrl^c`. A good solution to this couldn't be found and a temporary fix have been implemented. And as such, please be noted that if you use ctrl^c to exit, your active firefox sessions or tabs have a good chance of crashing. (Note: ctrl^c doesn't have any issues in Linux)
+---
 
-
-## Acknowledgments
-
-This script was created by Arinze(haxsys) using the following resources:
-
-- [Animepahe](https://animepahe.com/)
-- [Python Requests library](https://requests.readthedocs.io/)
-- [Beautiful Soup 4 library](https://www.crummy.com/software/BeautifulSoup/bs4/doc/)
+**Enjoy AutoPahe! 🎬**

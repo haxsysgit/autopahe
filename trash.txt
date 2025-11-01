@@ -1,2 +1,0 @@
- python3 ./autopahe/auto_pahe.py -s kabaneri -i 0 -d 1
- python3 ./autopahe/auto_pahe.py -w kabaneri,2

@@ -11,6 +11,7 @@ from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.chrome.service import Service as ChromeService
 
 from ap_core.parser import parse_mailfunction_api
+from ap_core.cookies import load_cookies, save_cookies
 
 # Driver paths (defaults)
 GECKO_PATH = "/snap/bin/geckodriver"
@@ -88,10 +89,16 @@ def driver_output(url: str, driver=False, content=False, json=False, wait_time=1
     try:
         driver_instance = browser("firefox")
         driver_instance.get(url)
+        
+        # Try to load persistent cookies for DDoS-Guard
+        load_cookies(driver_instance)
 
         # Critical for DDoS-Guard bypass: refresh then implicit wait
         driver_instance.refresh()
         driver_instance.implicitly_wait(wait_time)
+        
+        # Save cookies for future use
+        save_cookies(driver_instance)
 
         if content:
             page_source = driver_instance.page_source

@@ -16,22 +16,23 @@ Phase 2 — Feature Enhancements [COMPLETED]
 - [X] Enhanced execution tracker: 'all' and 'from X to Y' date ranges
 - [X] Summary command: --summary (execution stats + records summary)
 - [X] Config file (.ini) for defaults (browser, resolution, workers, download_dir, sort options)
-- [ ] Batch/Season selection helpers (e.g., --season 1, or range presets) [PENDING]
-- [ ] Fuzzy search and filters (year, status) for lookup [PENDING]
-- [ ] Notifications (desktop) when downloads complete [PENDING]
+- [X] Batch/Season selection helpers (--season flag for quick season downloads)
+- [X] Filters for lookup: --year and --status for search filtering
+- [X] Notifications (desktop) when downloads complete via --notify flag
 
-Phase 3 — Performance Improvements
-- [ ] Optional parallel download toggle with safe staggering (already present; expose via CLI)
-- [ ] Reuse a single Firefox instance for multiple episode page fetches (pooling) [careful with stability]
-- [ ] Persistent cookies jar to reduce DDoS-Guard friction between runs
-- [ ] Cache search and release API responses on disk
-- [ ] Adaptive waits based on first page timings (learned timings)
+Phase 3 — Performance Improvements [COMPLETED]
+- [X] Optional parallel download toggle with safe staggering (exposed via -w/--workers CLI)
+- [X] Persistent cookies jar to reduce DDoS-Guard friction between runs (automatic)
+- [X] Cache search and release API responses on disk (automatic with 6-hour expiry)
+- [X] Cache management commands: --cache clear|stats
+- [ ] Reuse a single Firefox instance for multiple episode page fetches (pooling) [DEFERRED: stability concerns]
+- [ ] Adaptive waits based on first page timings (learned timings) [DEFERRED: not critical]
 
-Phase 4 — DX & UX
-- [ ] CLI prompts: skip interactive mode when args provided (already)
-- [ ] Progress bars for multi-download queue
-- [ ] Rich logging levels: --verbose / --quiet
-- [ ] Better error messages for no links / captchas
+Phase 4 — DX & UX [COMPLETED]
+- [X] CLI prompts: skip interactive mode when args provided (already working)
+- [X] Progress bars for multi-download queue (tqdm integration)
+- [X] Rich logging levels: --verbose / --quiet
+- [X] Better error messages for no links / captchas (enhanced with emoji and tips)
 
 Notes
 - Preserve the working DDoS-Guard bypass (refresh + implicitly_wait).

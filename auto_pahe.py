@@ -8,6 +8,9 @@ from bs4 import BeautifulSoup
 from ap_core.banners import Banners, n
 from ap_core.browser import browser, driver_output, get_request_session, cached_request, cleanup_browsers
 from ap_core.config import load_app_config, write_sample_config, sample_config_text
+from ap_core.cache import cache_get, cache_set, cache_clear, get_cache_stats
+from ap_core.notifications import notify_download_complete, notify_download_failed
+from ap_core.cookies import clear_cookies
 from kwikdown import kwik_download
 from manager import (
     process_record,
@@ -70,12 +73,14 @@ else:
 
 ########################################### LOGGING ################################################
 
+# Logging will be configured after CLI parsing to respect --verbose/--quiet
+log_level = logging.INFO  # Default
 logging.basicConfig(
-    level=logging.INFO,  # Set the minimum log level
-    format='\n%(asctime)s - %(levelname)s - %(message)s',  # Log message format
+    level=log_level,
+    format='\n%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(),  # Output to console
-        logging.FileHandler('autopahe.log')  # Output to a file
+        logging.StreamHandler(),
+        logging.FileHandler('autopahe.log')
     ]
 )
 
@@ -197,7 +202,7 @@ Banners.header()
 
 
 
-def lookup(arg):
+def lookup(arg, year_filter=None, status_filter=None):
 
     global search_response_dict
 
@@ -209,8 +214,17 @@ def lookup(arg):
     animepahe_search_pattern = f'https://animepahe.si/api?m=search&q={arg}'
 
     try:
-        # Use cached GET to speed up repeats
-        search_response = cached_request(animepahe_search_pattern)
+        # Try disk cache first
+        cached = cache_get(animepahe_search_pattern, max_age_hours=6)
+        if cached:
+            search_response = cached
+            logging.debug("Loaded search results from disk cache")
+        else:
+            # Use HTTP request with in-memory cache
+            search_response = cached_request(animepahe_search_pattern)
+            if search_response:
+                cache_set(animepahe_search_pattern, search_response)
+                logging.debug("Saved search results to disk cache")
 
         #return if no anime found
         if not search_response:
@@ -247,6 +261,29 @@ def lookup(arg):
         Banners.header()
         logging.error("No results found. Please try a different search term.")
         print("\n❌ No anime found matching your search.\n")
+        return
+    
+    # Apply filters if provided
+    results = search_response_dict['data']
+    if year_filter:
+        try:
+            year = int(year_filter)
+            results = [r for r in results if r.get('year') == year]
+            logging.debug(f"Filtered by year={year}, {len(results)} results remain")
+        except ValueError:
+            pass
+    
+    if status_filter:
+        status_lower = status_filter.lower()
+        results = [r for r in results if status_lower in str(r.get('status', '')).lower()]
+        logging.debug(f"Filtered by status={status_filter}, {len(results)} results remain")
+    
+    # Update dict with filtered results
+    search_response_dict['data'] = results
+    
+    if not results:
+        Banners.header()
+        print(f"\n❌ No anime found matching your search with the given filters.\n")
         print("💡 Tips:")
         print("   - Try different spelling or formatting")
         print("   - Check if the anime name is correct")
@@ -457,7 +494,7 @@ def download(arg=1, download_file=True, res = "720"):
     # ========================================== Multi Download Utility ==========================================
 
     
-def multi_download(arg: str, download_file=True, resolution="720", max_workers=1):
+def multi_download(arg: str, download_file=True, resolution="720", max_workers=1, enable_notifications=False):
     """
     Downloads multiple episodes using ThreadPoolExecutor.
     Default is sequential (max_workers=1) for stability.
@@ -477,6 +514,13 @@ def multi_download(arg: str, download_file=True, resolution="720", max_workers=1
     else:
         logging.info(f"Starting parallel download of {len(eps)} episodes with {max_workers} workers")
     
+    # Progress tracking
+    try:
+        from tqdm import tqdm
+        use_tqdm = True
+    except ImportError:
+        use_tqdm = False
+    
     # Use ThreadPoolExecutor for downloads
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {}
@@ -487,8 +531,13 @@ def multi_download(arg: str, download_file=True, resolution="720", max_workers=1
             future = executor.submit(download, arg=ep, download_file=download_file, res=str(resolution))
             futures[future] = ep
         
-        # Wait for all downloads to complete
+        # Wait for all downloads to complete with progress bar
         completed = 0
+        failed = []
+        
+        if use_tqdm:
+            progress = tqdm(total=len(eps), desc="Downloading", unit="ep")
+        
         for future in as_completed(futures):
             ep = futures[future]
             try:
@@ -496,7 +545,21 @@ def multi_download(arg: str, download_file=True, resolution="720", max_workers=1
                 completed += 1
                 logging.info(f"Episode {ep} completed successfully ({completed}/{len(eps)})")
             except Exception as e:
+                failed.append(ep)
                 logging.error(f"Episode {ep} failed: {e}")
+            
+            if use_tqdm:
+                progress.update(1)
+        
+        if use_tqdm:
+            progress.close()
+    
+    # Send notification if enabled
+    if enable_notifications and download_file:
+        if failed:
+            notify_download_failed(animepicked, f"Failed: {', '.join(map(str, failed))}")
+        else:
+            notify_download_complete(animepicked, arg)
 
 
 
@@ -581,6 +644,13 @@ def command_main(args):
     sort_path = args.sort_path
     sort_dry = args.sort_dry_run
     summary_arg = args.summary
+    
+    # New Phase 2/3/4 args
+    year_filter = getattr(args, 'year', None)
+    status_filter = getattr(args, 'status', None)
+    enable_notifications = getattr(args, 'notify', False)
+    batch_season = getattr(args, 'season', None)
+    cache_cmd = getattr(args, 'cache', None)
 
     # Apply config-driven overrides
     global DOWNLOADS
@@ -599,10 +669,25 @@ def command_main(args):
     if barg:
         browser(barg)
 
-    # Search function
+    # Handle cache commands
+    if cache_cmd:
+        if cache_cmd == 'clear':
+            cache_clear()
+            clear_cookies()
+            print("✓ Cache and cookies cleared")
+            return
+        elif cache_cmd == 'stats':
+            stats = get_cache_stats()
+            print(f"\nCache Statistics:")
+            print(f"  Files: {stats['count']}")
+            print(f"  Size: {stats['size_mb']} MB")
+            print(f"  Path: {stats['path']}\n")
+            return
+    
+    # Search function with filters
     if sarg:
         records.append(sarg)
-        result = lookup(sarg)
+        result = lookup(sarg, year_filter=year_filter, status_filter=status_filter)
         if result is None:
             logging.error("Search failed. Exiting.")
             return
@@ -642,16 +727,26 @@ def command_main(args):
         process_record(records, update=True)
 
 
+    # Handle batch/season selection
+    if batch_season and iarg is not None:
+        # Convert season to episode range
+        # Assuming 12-13 episodes per season
+        season_num = int(batch_season)
+        start_ep = (season_num - 1) * 12 + 1
+        end_ep = season_num * 12
+        mdarg = f"{start_ep}-{end_ep}"
+        logging.info(f"Batch season {season_num}: downloading episodes {start_ep}-{end_ep}")
+    
     # Multi Download function
     if mdarg:
         records.append(mdarg)
-        multi_download(mdarg,download_file=True,resolution=parg, max_workers=args.workers)
+        multi_download(mdarg,download_file=True,resolution=parg, max_workers=args.workers, enable_notifications=enable_notifications)
         process_record(records, update=True)
         did_download = True
 
     if mlarg:
         records.append(mlarg)
-        multi_download(mlarg,download_file=False,resolution=parg, max_workers=args.workers)
+        multi_download(mlarg,download_file=False,resolution=parg, max_workers=args.workers, enable_notifications=enable_notifications)
         process_record(records, update=True)
         did_download = True
 
@@ -846,6 +941,16 @@ def main():
     parser.add_argument('--sort-path', help='Path to sort; defaults to Downloads')
     parser.add_argument('--sort-dry-run', action='store_true', help='Dry-run sorting (no changes)')
     parser.add_argument('--summary', help='Show execution stats and records summary; accepts same formats as --execution_data')
+    
+    # Phase 2/3/4 enhancements
+    parser.add_argument('--year', type=int, help='Filter search results by year (e.g., 2020)')
+    parser.add_argument('--status', type=str, help='Filter search results by status (e.g., "Finished Airing")')
+    parser.add_argument('--season', type=int, help='Download entire season (12-13 eps). Example: --season 1 downloads eps 1-12')
+    parser.add_argument('--notify', action='store_true', help='Enable desktop notifications on download complete/fail')
+    parser.add_argument('--cache', choices=['clear', 'stats'], help='Cache management: clear (remove all) or stats (show info)')
+    parser.add_argument('--verbose', action='store_true', help='Enable verbose logging (DEBUG level)')
+    parser.add_argument('--quiet', action='store_true', help='Minimal logging (WARNING level only)')
+    
     # Repeat config flags for help
     parser.add_argument('--config', help='Path to a config INI file')
     parser.add_argument('--write-config', nargs='?', const='', help='Write a sample config to the given path (or default) and exit')
@@ -863,6 +968,13 @@ def main():
 
     # Parse the command-line arguments
     args = parser.parse_args(remaining)
+    
+    # Configure logging level based on --verbose/--quiet
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logging.debug("Verbose logging enabled")
+    elif args.quiet:
+        logging.getLogger().setLevel(logging.WARNING)
 
     # If any arguments are provided, process them using command_main
     if any(vars(args).values()):

@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
 
 import requests                # For sending HTTP requests and managing sessions
-import os                     # For file/directory management
-import tqdm                   # For progress bar during file download
-import time                   # For delay/retries
-from bs4 import BeautifulSoup # For parsing HTML content
-from selenium import webdriver  # For controlling a real browser (headless)
-from selenium.webdriver.firefox.service import Service as FirefoxService
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait         # To wait for elements to load
-from selenium.webdriver.support import expected_conditions as EC
+import os                      # For file/directory management
+import tqdm                    # For progress bar during file download
+import time                    # For delay/retries
+from pathlib import Path
+from bs4 import BeautifulSoup  # For parsing HTML content
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from ap_core.browser import get_pw_context
 
 
 def setup_session(retries=5):
@@ -75,51 +72,56 @@ def download_with_retries(session, posturl, params, headers, filename, ep, chunk
                 print("Download failed after all retries.")
                 return
 
-def kwik_download(url, browser="firefox", dpath=os.getcwd(), chunk_size=1024 * 300, ep=None, animename=None):
+def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 300, ep=None, animename=None):
     os.chdir(dpath)
 
     posturl = url.replace("/f/", "/d/")  # Build POST endpoint based on pattern
 
-    # Set up optimized headless Firefox browser via Selenium
-    service = FirefoxService(executable_path="/snap/bin/geckodriver", log_path=os.devnull)
-    options = webdriver.FirefoxOptions()
-    options.add_argument("--headless")  # Run without GUI
-    
-    # Performance optimizations
-    options.set_preference("browser.cache.disk.enable", False)
-    options.set_preference("browser.cache.memory.enable", False)
-    options.set_preference("permissions.default.image", 2)  # Disable images
-    options.page_load_strategy = 'normal'  # Changed to normal for stability
-    
-    # Marionette stability
-    options.set_preference("marionette.port", 0)
-    
-    driver = None
-    try:
-        driver = webdriver.Firefox(service=service, options=options)
-        driver.get(url)  # Open the kwik.si file page
-
-        # Wait until the form appears (ensures JS executed)
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "form")))
-        time.sleep(3)  # Wait for any countdowns
-
-        # Parse the current page source to extract the form
-        soup = BeautifulSoup(driver.page_source, "lxml")
-        form = soup.find("form")
-        token = form.find("input", {"type": "hidden"})["value"]  # Extract CSRF token
-    except Exception as e:
-        print("Could not find token:", e)
-        if driver:
-            driver.quit()
-        return
-
-    # Capture all cookies from the browser into the requests session
-    selenium_cookies = driver.get_cookies()
-    driver.quit()
-
+    token = None
     session = requests.Session()  # Persistent session for reuse
-    for cookie in selenium_cookies:
-        session.cookies.set(cookie['name'], cookie['value'], domain=cookie.get('domain', 'kwik.si'))
+
+    # Use Playwright to get token and cookies
+    browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or browser or 'chrome').lower()
+    user_data_dir = str(Path.home() / '.cache' / 'autopahe-pw' / browser_choice)
+    try:
+        context = get_pw_context(browser_choice, headless=False)
+        if context is None:
+            print('Playwright context not available')
+            return
+        page = context.new_page()
+        page.goto(url, wait_until='domcontentloaded', timeout=60000)
+        # Wait for form and potential countdown
+        try:
+            page.wait_for_selector('form', timeout=10000)
+        except Exception:
+            pass
+        time.sleep(3)
+
+        soup = BeautifulSoup(page.content(), 'lxml')
+        form = soup.find('form')
+        if not form:
+            page.close()
+            print('Could not locate download form on kwik page')
+            return
+        hidden = form.find('input', {'type': 'hidden'})
+        if not hidden or not hidden.get('value'):
+            page.close()
+            print('Could not extract CSRF token')
+            return
+        token = hidden['value']
+
+        # Transfer cookies from Playwright to requests.Session
+        try:
+            cookies = context.cookies([url])
+        except Exception:
+            cookies = context.cookies()
+        for c in cookies:
+            domain = c.get('domain') or 'kwik.si'
+            session.cookies.set(c['name'], c['value'], domain=domain)
+        page.close()
+    except Exception as e:
+        print('Playwright failed to capture token/cookies:', e)
+        return
 
     # Construct realistic headers (mimic real browser)
     headers = {

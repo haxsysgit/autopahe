@@ -1,128 +1,19 @@
 import os
-import sys
-import time
 import logging
-import tempfile
 import requests
-import shutil
-from functools import lru_cache
-
-from selenium import webdriver
-from selenium.common.exceptions import WebDriverException
-from selenium.webdriver.firefox.service import Service as FirefoxService
-from selenium.webdriver.chrome.service import Service as ChromeService
-
+import json as jsonlib
+from pathlib import Path
+ 
 from ap_core.parser import parse_mailfunction_api
-from ap_core.cookies import load_cookies, save_cookies
 
-# Cross-platform driver detection
-def _find_driver(driver_name):
-    """Find driver executable in system PATH or common locations"""
-    # Try to find in PATH first
-    driver_path = shutil.which(driver_name)
-    if driver_path:
-        return driver_path
-    
-    # Platform-specific common locations
-    platform = sys.platform.lower()
-    common_paths = []
-    
-    if platform == 'linux':
-        common_paths = [
-            f'/snap/bin/{driver_name}',
-            f'/usr/local/bin/{driver_name}',
-            f'/usr/bin/{driver_name}',
-            f'~/.local/bin/{driver_name}',
-        ]
-    elif platform == 'darwin':  # macOS
-        common_paths = [
-            f'/usr/local/bin/{driver_name}',
-            f'/opt/homebrew/bin/{driver_name}',
-            f'~/bin/{driver_name}',
-        ]
-    elif platform == 'win32':  # Windows
-        if not driver_name.endswith('.exe'):
-            driver_name += '.exe'
-        common_paths = [
-            f'C:\\Program Files\\{driver_name}',
-            f'C:\\Windows\\System32\\{driver_name}',
-            f'{os.environ.get("USERPROFILE", "")}\\AppData\\Local\\Programs\\{driver_name}',
-        ]
-    
-    # Check common locations
-    for path in common_paths:
-        expanded = os.path.expanduser(path)
-        if os.path.isfile(expanded) and os.access(expanded, os.X_OK):
-            return expanded
-    
-    # Return None if not found (Selenium will try to find it)
-    return None
-
-# Try to locate drivers
-GECKO_PATH = _find_driver('geckodriver')
-CHROME_PATH = _find_driver('chromedriver')
-
-
-def make_firefox_driver():
-    """
-    Return a headless Firefox WebDriver with an isolated profile & unique port.
-    Keeps the proven-stable config to preserve DDoS-Guard bypass behavior.
-    Cross-platform compatible.
-    """
-    opts = webdriver.FirefoxOptions()
-    opts.add_argument("--headless")
-
-    # Isolated clean profile
-    profile_dir = tempfile.mkdtemp(prefix="fw_profile_")
-    opts.profile = profile_dir
-
-    # Create service with driver path if found, otherwise let Selenium find it
-    if GECKO_PATH:
-        service = FirefoxService(executable_path=GECKO_PATH)
-        return webdriver.Firefox(service=service, options=opts)
-    else:
-        # Let Selenium/webdriver-manager handle it
-        try:
-            return webdriver.Firefox(options=opts)
-        except Exception as e:
-            logging.error(f"Firefox driver not found. Please install geckodriver: {e}")
-            logging.info("Install guide: https://github.com/mozilla/geckodriver/releases")
-            raise
-
-
-def browser(choice: str = "firefox"):
-    """Cross-platform browser initialization"""
-    chrome_guess = ["chrome", "Chrome", "google chrome", "google"]
-    ff_guess = ["ff", "firefox", "ffgui", "ffox", "fire"]
-
-    if choice.lower() in chrome_guess:
-        logging.info("Launching Chrome")
-        opts = webdriver.ChromeOptions()
-        opts.add_argument("--headless")
-        
-        if CHROME_PATH:
-            service = ChromeService(executable_path=CHROME_PATH)
-            return webdriver.Chrome(service=service, options=opts)
-        else:
-            try:
-                return webdriver.Chrome(options=opts)
-            except Exception as e:
-                logging.error(f"Chrome driver not found. Please install chromedriver: {e}")
-                logging.info("Install guide: https://chromedriver.chromium.org/downloads")
-                raise
-
-    if choice.lower() in ff_guess or not choice:
-        logging.info("Launching optimized headless Firefox")
-        return make_firefox_driver()
-
-    logging.error("Unsupported browser choice")
-    raise ValueError(f"Unsupported browser: {choice}")
+ 
 
 
 # Request session with connection pooling (shared)
 _request_session = None
 
 def get_request_session():
+    """Return a shared requests.Session with connection pooling."""
     global _request_session
     if _request_session is None:
         _request_session = requests.Session()
@@ -137,67 +28,169 @@ def get_request_session():
     return _request_session
 
 
-@lru_cache(maxsize=100)
-def cached_request(url):
-    session = get_request_session()
+ 
+
+
+_pw = None
+_pw_context = None
+_driver_cache = {}
+
+def get_pw_context(browser_choice: str = None, headless: bool = False):
+    """Return a shared Playwright persistent context (single OS window).
+
+    Creates it on first use and reuses it afterwards so repeated calls do not
+    spawn multiple browser windows. Browser is selected via AUTOPAHE_BROWSER
+    or the provided browser_choice.
+    """
+    global _pw, _pw_context
+    if _pw_context is not None:
+        return _pw_context
     try:
-        response = session.get(url, timeout=10)
-        return response.content
-    except Exception:
+        try:
+            from playwright.sync_api import sync_playwright
+        except ModuleNotFoundError:
+            logging.error("Playwright is not installed in this environment. Run: 'uv sync' then 'uv run playwright install' or invoke the app with 'uv run autopahe ...'.")
+            return None
+        _pw = sync_playwright().start()
+        choice = (browser_choice or os.environ.get("AUTOPAHE_BROWSER") or "chrome").lower()
+        user_data_dir = str(Path.home() / ".cache" / "autopahe-pw" / choice)
+        if choice == "firefox":
+            _pw_context = _pw.firefox.launch_persistent_context(user_data_dir, headless=headless)
+        elif choice == "chrome":
+            try:
+                _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, channel="chrome", headless=headless)
+            except Exception:
+                _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, headless=headless)
+        else:
+            _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, headless=headless)
+        return _pw_context
+    except Exception as e:
+        logging.error(f"Failed to start Playwright context: {e}")
         return None
 
 
-def driver_output(url: str, driver=False, content=False, json=False, wait_time=10):
+def close_pw_context():
+    """Close the shared Playwright context and stop Playwright."""
+    global _pw, _pw_context
+    try:
+        if _pw_context is not None:
+            _pw_context.close()
+    except Exception:
+        pass
+    finally:
+        _pw_context = None
+    try:
+        if _pw is not None:
+            _pw.stop()
+    except Exception:
+        pass
+    finally:
+        _pw = None
+
+
+def driver_output(url: str, driver=False, content=False, json=False, wait_time=5):
+    """Fetch content using Playwright.
+
+    Args:
+        url: Target URL to fetch.
+        driver: Set True to enable browser fetch (kept for API compatibility).
+        content: If True, return full HTML.
+        json: If True, return parsed JSON (or fallback parse).
+        wait_time: Seconds to wait after initial load.
+
+    Uses the AUTOPAHE_BROWSER env var to choose 'chrome' (default), 'chromium', or 'firefox'.
+    """
     if not driver:
         logging.error("Invalid arguments provided to driver_output function.")
         print("Use the 'content' argument to get page content or 'json' argument to get JSON response.")
         return None
 
-    driver_instance = None
     try:
-        driver_instance = browser("firefox")
-        driver_instance.get(url)
-        
-        # Try to load persistent cookies for DDoS-Guard
-        load_cookies(driver_instance)
-
-        # Critical for DDoS-Guard bypass: refresh then implicit wait
-        driver_instance.refresh()
-        driver_instance.implicitly_wait(wait_time)
-        
-        # Save cookies for future use
-        save_cookies(driver_instance)
+        # In-process cache by URL
+        key = (url, 'content' if content else 'json' if json else 'text')
+        if key in _driver_cache:
+            return _driver_cache[key]
+        browser_choice = (os.environ.get("AUTOPAHE_BROWSER") or "chrome").lower()
+        headless = False
+        context = get_pw_context(browser_choice, headless=headless)
+        if context is None:
+            return None
+        page = context.new_page()
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(int(wait_time or 10) * 1000)
 
         if content:
-            page_source = driver_instance.page_source
-            driver_instance.quit()
-            return page_source
+            html = page.content()
+            page.close()
+            _driver_cache[key] = html
+            return html
 
         if json:
-            json_data = driver_instance.execute_script("return document.body.innerText;")
-            driver_instance.quit()
-            dict_data = parse_mailfunction_api(json_data)
-            if dict_data is None:
-                raise ValueError("Failed to parse malformed JSON.")
-            return dict_data
+            body_text = page.evaluate("document.body.innerText")
+            page.close()
+            try:
+                parsed = jsonlib.loads(body_text)
+            except Exception:
+                parsed = parse_mailfunction_api(body_text)
+            _driver_cache[key] = parsed
+            return parsed
 
     except Exception as e:
-        logging.error(f"Selenium failed to load the page: {e}")
-        if driver_instance:
-            try:
-                driver_instance.quit()
-            except Exception:
-                pass
+        logging.error(f"Playwright failed to load the page: {e}")
         return None
 
 
-# No-op for now; kept for API compatibility
-_defunct_pool = []
-
 def cleanup_browsers():
-    for d in list(_defunct_pool):
+    close_pw_context()
+
+
+def batch_driver_output(urls, content=False, json=False, wait_time=5):
+    """Fetch multiple URLs using a single Playwright context.
+
+    Args:
+        urls: Iterable of URL strings to fetch.
+        content: If True, return HTML content per URL.
+        json: If True, return parsed JSON per URL.
+        wait_time: Seconds to wait after initial load per URL.
+
+    Returns:
+        dict mapping url -> result (str for content, dict for json). Missing entries map to None.
+    """
+    results = {}
+    browser_choice = (os.environ.get("AUTOPAHE_BROWSER") or "chrome").lower()
+    context = get_pw_context(browser_choice, headless=False)
+    if context is None:
+        for u in urls:
+            results[u] = None
+        return results
+    for u in urls:
         try:
-            d.quit()
+            key = (u, 'content' if content else 'json' if json else 'text')
+            if key in _driver_cache:
+                results[u] = _driver_cache[key]
+                continue
+            page = context.new_page()
+            page.goto(u, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(int(wait_time or 10) * 1000)
+            if content:
+                html = page.content()
+                page.close()
+                _driver_cache[key] = html
+                results[u] = html
+            elif json:
+                body_text = page.evaluate("document.body.innerText")
+                page.close()
+                try:
+                    parsed = jsonlib.loads(body_text)
+                except Exception:
+                    parsed = parse_mailfunction_api(body_text)
+                _driver_cache[key] = parsed
+                results[u] = parsed
+            else:
+                text = page.evaluate("document.body.innerText")
+                page.close()
+                _driver_cache[key] = text
+                results[u] = text
         except Exception:
-            pass
-    _defunct_pool.clear()
+            results[u] = None
+    return results

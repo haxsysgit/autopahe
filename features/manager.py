@@ -187,7 +187,7 @@ def add_new_record(record, database):
     }
     save_database(database)
 
-def process_record(record, update=False):
+def process_record(record, update=False, quiet=False):
     """
     Process and add a new record to the database. If the record exists, update it if `update` is True.
     """
@@ -200,12 +200,15 @@ def process_record(record, update=False):
     
     if existing_index is not None:
         if update:
-            print(f"\nRecord with title '{title}' already exists. Updating it.\n")
+            if not quiet:
+                print(f"\nRecord with title '{title}' already exists. Updating it.\n")
             update_entry(record, database)
         else:
-            print(f"\nRecord with title '{title}' already exists. No action taken.\n")
+            if not quiet:
+                print(f"\nRecord with title '{title}' already exists. No action taken.\n")
     else:
-        print(f"\nAdding new record with title '{title}'.")
+        if not quiet:
+            print(f"\nAdding new record with title '{title}'.")
         add_new_record(record, database)
 
 def delete_record(key_or_title):

@@ -7,3 +7,4 @@ json_data/
 *.log
 Docs/
 *.lock
+COMMIT_MESSAGE.txt

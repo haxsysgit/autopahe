@@ -1,16 +1,34 @@
 #! /usr/bin/python3
-import time,argparse,os,sys,requests,tempfile
-import re
-from pathlib import Path
+"""AutoPahe - Anime downloader with advanced features"""
+
+# Standard library imports
+import os
+import time
+import argparse
 import logging
-from json import loads,load,dump,dumps,JSONDecodeError
+import atexit
+from pathlib import Path
+from json import loads,dumps
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import re
+
+# Color imports for terminal output
+from colorama import Fore, Style, init
+init()
+
+# Third-party imports
+import requests
 from bs4 import BeautifulSoup
+
+# Local imports - Core functionality
 from ap_core.banners import Banners, n
-from ap_core.browser import browser, driver_output, get_request_session, cached_request, cleanup_browsers
-from ap_core.config import load_app_config, write_sample_config, sample_config_text
+from ap_core.browser import driver_output, cleanup_browsers, get_request_session, get_pw_context, batch_driver_output
+from ap_core.config import load_app_config, write_sample_config
 from ap_core.cache import cache_get, cache_set, cache_clear, get_cache_stats
 from ap_core.notifications import notify_download_complete, notify_download_failed
 from ap_core.cookies import clear_cookies
+
+# Local imports - Features
 from kwikdown import kwik_download
 from features.manager import (
     process_record,
@@ -26,57 +44,20 @@ from features.manager import (
     export_records,
     import_records,
 )
-from features.pahesort import rename_anime, organize_anime, gather_anime
+from features.pahesort import rename_anime, organize_anime
 from features.execution_tracker import log_execution_time, reset_run_count, get_execution_stats
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from functools import lru_cache
-import atexit
-
-############################################## Selenium imports #################################################
-
-from selenium import webdriver
-from selenium.webdriver.firefox.options import Options
-from selenium.webdriver.firefox.service import Service as chrome_service
-from selenium.webdriver.chrome.service import Service as ff_service
-from selenium.common.exceptions import WebDriverException
 
 
 ########################################### GLOBAL VARIABLES ######################################
 
-# Paths to your driver executables
-GECKO_PATH = "/snap/bin/geckodriver"
-CHROME_PATH = "/snap/bin/chromedriver"
-
-# Counter for unique Marionette ports
-_port_counter = 2828
-
-# Global browser pool for reuse
-_browser_pool = []
-_max_browsers = 3  # Limit concurrent browsers
-_pool_lock = None
-
-# Download path
-system_name = sys.platform.lower()
-
-if system_name == "win32":
-    DOWNLOADS = Path.home() / "Downloads"
-
-elif system_name == "darwin":  # macOS
-    DOWNLOADS = Path.home() / "Downloads"
-
-elif system_name == "linux":
-    DOWNLOADS = Path.home() / "Downloads"
-
-else:
-    raise Exception("An Error Occurred, Unsupported Operating System")
-    exit()
+# Default download path (OS-specific)
+DOWNLOADS = Path.home() / "Downloads"
 
 ########################################### LOGGING ################################################
 
-# Logging will be configured after CLI parsing to respect --verbose/--quiet
-log_level = logging.INFO  # Default
+# Configure logging (level will be adjusted based on CLI args)
 logging.basicConfig(
-    level=log_level,
+    level=logging.INFO,
     format='\n%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
@@ -87,174 +68,103 @@ logging.basicConfig(
 
 #######################################################################################################################
 
-#Record list
+# Global record list for tracking downloads
 records = []
 
+# Global search response dictionary
+search_response_dict = {}
 
-############################################ BROWSER HANDLING ##########################################################
+# Global anime selection
+animepicked = None
+episode_page_format = None
 
-# Register cleanup on exit for imported cleanup function
+# In-memory cache for episode data (faster than disk cache)
+_episode_cache = {}
+_prefetched_pages = {}
+
+############################################ CLEANUP ##########################################################
+
+# Register cleanup on exit to close any open browsers
 atexit.register(cleanup_browsers)
 
 
 
 
-###############################################################################################
-
-
-def parse_mailfunction_api(text):
-    result = {}
-    data_list = []
-    current_item = None
-    in_data = False
-
-    def parse_value(val):
-        # remove surrounding quotes
-        val = val.strip()
-        if m := re.match(r'^"(.*)"$', val):
-            return m.group(1)
-        # integer?
-        if re.fullmatch(r'\d+', val):
-            return int(val)
-        # float?
-        if re.fullmatch(r'\d+\.\d+', val):
-            return float(val)
-        return val
-
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-
-        # Top-level until we see 'data'
-        if not in_data:
-            if line == "data":
-                in_data = True
-                continue
-            if key_val := line.split(None, 1):
-                key = key_val[0]
-                if len(key_val) == 2:
-                    val = parse_value(key_val[1])
-                    result[key] = val
-                continue
-
-        # Inside data items
-        # If line is only a number, start new item
-        if re.fullmatch(r'\d+', line):
-            if current_item is not None:
-                data_list.append(current_item)
-            current_item = {}
-        else:
-            # key and value
-            parts = line.split(None, 1)
-            if len(parts) == 2:
-                key, raw_val = parts
-                current_item[key] = parse_value(raw_val)
-
-    # Append last item
-    if current_item is not None:
-        data_list.append(current_item)
-
-    result["data"] = data_list
-    return result
-
-
-
-def data_report(data:dict,filepath = "autopahe_data.json",):
-    if data:
-        # Read existing JSON data from file
-        if os.path.exists(filepath):
-            with open(filepath, 'r') as json_file:
-                existing_data = load(json_file)
-        else:
-            open(filepath,"x")
-            existing_data={}
-
-        new_data = {**existing_data,**data}
-            
-        with open(filepath,"w") as st:
-            dump(new_data,st,indent=4)
-
-current_system_os = str(sys.platform) #get current os
-
-
-# Banner Header
-Banners.header()
-
-
-# ... (rest of the code remains the same)
-
-
-# # TEXT wrap decorator
-# def box_text(func):
-#     def wrapper():
-#         box_width = 70
-#         padding = (box_width - len(func())) // 2
-#         print('*' * box_width)
-#         print('*' + ' ' * padding + func() + ' ' * (box_width - len(func()) - padding) + '*')
-#         print('*' * box_width)
-
-        
-#     return wrapper
-
-    
-# =======================================================================================================
+############################################ HELPER FUNCTIONS ##########################################
 
 
 
 def lookup(arg, year_filter=None, status_filter=None):
+    """Search for anime using AnimePahe API with filters.
+    
+    Tries disk cache first, then direct HTTP request, falls back to Playwright only if needed.
+    This avoids unnecessary browser launches for better performance.
+    
+    Args:
+        arg: Search query string
+        year_filter: Optional year to filter results
+        status_filter: Optional status string to filter results
+    """
+    global search_response_dict, _from_cache
+    _from_cache = False
 
-    global search_response_dict
-
-    # Search banner
+    # Display search banner
     Banners.search(arg)
-    n()
+    print()  # Use regular print instead of n() which might clear screen
 
-    # url pattern requested when anime is searched
-    animepahe_search_pattern = f'https://animepahe.si/api?m=search&q={arg}'
+    # API endpoint for search
+    api_url = f'https://animepahe.si/api?m=search&q={arg}'
+    search_response = None
 
     try:
-        # Try disk cache first
-        cached = cache_get(animepahe_search_pattern, max_age_hours=6)
+        # Step 1: Check disk cache (24-hour expiry for better performance)
+        cached = cache_get(api_url, max_age_hours=24)
         if cached:
             search_response = cached
-            logging.debug("Loaded search results from disk cache")
+            _from_cache = True
+            logging.debug("✓ Loaded from disk cache")
         else:
-            # Use HTTP request with in-memory cache
-            search_response = cached_request(animepahe_search_pattern)
-            if search_response:
-                cache_set(animepahe_search_pattern, search_response)
-                logging.debug("Saved search results to disk cache")
+            # Step 2: Try direct HTTP request (fast, no browser needed)
+            logging.debug("Fetching from API...")
+            response = requests.get(api_url, timeout=10)
+            if response.status_code == 200:
+                search_response = response.content
+                # Save to disk cache for future use
+                cache_set(api_url, search_response)
+                logging.debug("✓ Fetched from API and cached")
+            else:
+                logging.warning(f"API returned status {response.status_code}")
 
-        #return if no anime found
-        if not search_response:
-            Banners.header()
-            logging.info("No matching anime found. Retry!")
-            return
-        
-        # converting response json data to python dictionary for operation
-        search_response_dict = loads(search_response)
-        
-        logging.debug(f"Direct API call succeeded. Found {len(search_response_dict.get('data', []))} results")
-
-    except Exception as e:
-        logging.warning(f"Direct API request failed ({e}), falling back to Selenium browser...")
-        search_response = driver_output(animepahe_search_pattern,driver=True,json=True, wait_time=30)
+        # Parse response if we got one
         if search_response:
-            search_response_dict = search_response
-            logging.debug(f"Selenium fallback succeeded. Found {len(search_response_dict.get('data', []))} results")
+            search_response_dict = loads(search_response)
+            logging.debug(f"Found {len(search_response_dict.get('data', []))} results")
         else:
-            logging.error("Both direct API and Selenium failed to retrieve search results")
+            # Step 3: Only use Playwright as last resort (slow, resource intensive)
+            logging.warning("Direct API failed, falling back to Playwright...")
+            search_response = driver_output(api_url, driver=True, json=True, wait_time=5)
+            if search_response:
+                search_response_dict = search_response
+                logging.debug(f"Playwright fallback succeeded")
+                # Don't close browser yet - might need it for index/about operations
+            else:
+                logging.error("All methods failed to retrieve search results")
+                search_response_dict = {'data': []}
+
+    except requests.exceptions.RequestException as e:
+        # Network error - try Playwright fallback
+        logging.warning(f"Network error ({e}), trying Playwright...")
+        try:
+            search_response = driver_output(api_url, driver=True, json=True, wait_time=5)
+            if search_response:
+                search_response_dict = search_response
+            else:
+                search_response_dict = {'data': []}
+        except Exception:
             search_response_dict = {'data': []}
-
-    # print(search_response)
-
-    # print(animepahe_search_pattern)
-
-    # all animepahe has a session url and the url will be https://animepahe.com/anime/[then the session id]
-
-
-
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}")
+        search_response_dict = {'data': []}
 
     # Check if results exist
     if not search_response_dict or 'data' not in search_response_dict or not search_response_dict['data']:
@@ -262,6 +172,9 @@ def lookup(arg, year_filter=None, status_filter=None):
         logging.error("No results found. Please try a different search term.")
         print("\n❌ No anime found matching your search.\n")
         return
+    
+    # Debug: Show we have results
+    logging.info(f"Processing {len(search_response_dict['data'])} search results")
     
     # Apply filters if provided
     results = search_response_dict['data']
@@ -291,32 +204,46 @@ def lookup(arg, year_filter=None, status_filter=None):
         return None
     
     resultlen = len(search_response_dict['data'])
-    n()
-    print(f'{resultlen} results were found  ---> ')
-
-    n()
+    print()  # Add spacing instead of clearing screen
+    
+    # Check if data came from cache
+    cache_indicator = ""
+    if '_from_cache' in globals() and _from_cache:
+        cache_indicator = f" {Fore.GREEN}⚡{Style.RESET_ALL}"
+    
+    print(f'{Fore.GREEN}🎬 Found {resultlen} results{cache_indicator}{Style.RESET_ALL} {Fore.CYAN}--->{Style.RESET_ALL}')
+    print()
 
     for el in range(len(search_response_dict['data'])):
         name = search_response_dict['data'][el]['title']
-
         episodenum = search_response_dict['data'][el]['episodes']
-
         status = search_response_dict['data'][el]['status']
-
         year = search_response_dict['data'][el]['year']
-
+        anime_type = search_response_dict['data'][el].get('type', 'N/A')
         
+        # Type emoji mapping
+        type_emoji = {
+            'TV': '📺',
+            'Movie': '🎬',
+            'ONA': '💻',
+            'OVA': '📀'
+        }.get(anime_type, '📺')
+        
+        # Status color mapping
+        status_color = {
+            'Finished Airing': Fore.GREEN,
+            'Currently Airing': Fore.YELLOW,
+            'Not yet aired': Fore.RED
+        }.get(str(status), Fore.WHITE)
+        
+        print(f'{Fore.MAGENTA}[{el}]{Style.RESET_ALL} {type_emoji} {Fore.CYAN}{name}{Style.RESET_ALL}')
+        print(f'   {Fore.BLUE}├─ Episodes:{Style.RESET_ALL} {Fore.YELLOW}{episodenum}{Style.RESET_ALL}')
+        print(f'   {Fore.BLUE}├─ Status:{Style.RESET_ALL} {status_color}{status}{Style.RESET_ALL}')
+        print(f'   {Fore.BLUE}├─ Year:{Style.RESET_ALL} {Fore.YELLOW}{year}{Style.RESET_ALL}')
+        print(f'   {Fore.BLUE}└─ Type:{Style.RESET_ALL} {Fore.YELLOW}{anime_type}{Style.RESET_ALL}')
+        print()
 
-        print(f'''
-        [{el}] : {name}
-        ---------------------------------------------------------
-                Number of episodes contained : {episodenum}
-                Current status of the anime : {status}
-                Year the anime aired : {year}
-        ''')
-
-    n()
-
+    print()  # Add spacing instead of clearing screen
     return search_response_dict
 
 
@@ -326,54 +253,143 @@ def lookup(arg, year_filter=None, status_filter=None):
     
 
 def index(arg):
-
-    n()
-
-    global jsonpage_dict,session_id,animepicked,episode_page_format
-
-
-    animepicked = search_response_dict['data'][arg]['title']
+    """Display information about the selected anime and prepare for downloads.
     
-    #session id of the whole session with the anime
-    session_id = search_response_dict['data'][arg]['session']
+    Args:
+        arg: Index of the anime in search results
+    """
+    print("\n")  # Don't clear screen, just add spacing
 
-    # anime episode page url format and url
-    
-    episode_page_format = f'https://animepahe.com/anime/{session_id}'
-    
-    # now the anime_json_data url format
-    anime_url_format = f'https://animepahe.com/api?m=release&id={session_id}&sort=episode_asc&page=1'
-
+    global jsonpage_dict, session_id, animepicked, episode_page_format, search_response_dict
 
     try:
-        session = get_request_session()
-        jsonpage_dict = loads(session.get(anime_url_format, timeout=10).content)
-    except:
-        jsonpage_dict = driver_output(anime_url_format,driver=True,json=True, wait_time=20)
-
-
- 
-    episto = jsonpage_dict['total']
-    year = search_response_dict['data'][arg]['year']
-    type = search_response_dict['data'][arg]['type']
-    image = search_response_dict['data'][arg]['poster']
-    stat = search_response_dict['data'][arg]['status']
-    
-    Banners.select(animepicked,eps=episto, anipage=episode_page_format,year=year,
-                   atype = type,img = image,status=stat)
-
-    final_data = {**search_response_dict,**jsonpage_dict}
-    data_report(data=final_data)
-    n()
-    
+        # Get anime data from search results
+        anime_data = search_response_dict['data'][int(arg)]
+        
+        # Set global variables
+        animepicked = anime_data['title']
+        session_id = anime_data['session']
+        episode_page_format = f'https://animepahe.com/anime/{session_id}'
+        
+        # Get episode list
+        anime_url_format = f'https://animepahe.com/api?m=release&id={session_id}&sort=episode_asc&page=1'
+        
+        # Check in-memory cache first (fastest)
+        if anime_url_format in _episode_cache:
+            jsonpage_dict = _episode_cache[anime_url_format]
+            logging.debug("✓ Loaded episode list from memory cache")
+        else:
+            # Initialize jsonpage_dict to avoid undefined error
+            jsonpage_dict = None
+            
+            # Try disk cache next
+            cached = cache_get(anime_url_format, max_age_hours=12)  # 12 hours for episode data
+            if cached:
+                jsonpage_dict = cached
+                logging.debug("✓ Loaded episode list from disk cache")
+                # Store in memory cache for even faster access
+                _episode_cache[anime_url_format] = jsonpage_dict
+            else:
+                # Try direct HTTP request first (faster, no browser)
+                try:
+                    session = get_request_session()
+                    response = session.get(anime_url_format, timeout=10)
+                    if response.status_code == 200:
+                        jsonpage_dict = response.json()
+                        logging.debug("Successfully fetched episode list via HTTP")
+                        # Cache the result
+                        _episode_cache[anime_url_format] = jsonpage_dict
+                        cache_set(anime_url_format, jsonpage_dict)
+                except Exception as e:
+                    logging.warning(f"HTTP request failed: {e}")
+                    # Fall back to Playwright if HTTP fails
+                    logging.info("Falling back to Playwright for episode list...")
+                    jsonpage_dict = driver_output(anime_url_format, driver=True, json=True, wait_time=5)
+                    if jsonpage_dict:
+                        # Cache the result even from Playwright
+                        _episode_cache[anime_url_format] = jsonpage_dict
+                        cache_set(anime_url_format, jsonpage_dict)
+        
+        if not jsonpage_dict or 'data' not in jsonpage_dict:
+            logging.error("Failed to fetch episode list. The server may be down or rate limiting requests.")
+            # Still display basic anime info even if episode list fails
+            anime_info = {
+                'title': anime_data['title'],
+                'episodes': anime_data.get('episodes', 'N/A'),
+                'year': anime_data.get('year', 'N/A'),
+                'type': anime_data.get('type', 'N/A'),
+                'status': anime_data.get('status', 'N/A'),
+                'image': f"https://animepahe.si{anime_data.get('poster', '')}" if anime_data.get('poster') and not anime_data.get('poster', '').startswith('http') else anime_data.get('poster', 'No image available'),
+                'episode_count': 'N/A',
+                'first_episode': 'N/A',
+                'last_episode': 'N/A'
+            }
+        else:
+            # Prepare anime info for display
+            anime_info = {
+                'title': anime_data['title'],
+                'episodes': jsonpage_dict.get('total', anime_data.get('episodes', 'N/A')),
+                'year': anime_data.get('year', 'N/A'),
+                'type': anime_data.get('type', 'N/A'),
+                'status': anime_data.get('status', 'N/A'),
+                'image': f"https://animepahe.si{anime_data.get('poster', '')}" if anime_data.get('poster') and not anime_data.get('poster', '').startswith('http') else anime_data.get('poster', 'No image available'),
+                'episode_count': len(jsonpage_dict.get('data', [])),
+                'first_episode': jsonpage_dict['data'][0]['episode'] if jsonpage_dict.get('data') else 'N/A',
+                'last_episode': jsonpage_dict['data'][-1]['episode'] if jsonpage_dict.get('data') else 'N/A'
+            }
+        
+        # Display anime info without clearing the screen to preserve search results
+        Banners.select(
+            anime=anime_info['title'],
+            eps=anime_info['episodes'],
+            anipage=episode_page_format,
+            year=anime_info['year'],
+            atype=anime_info['type'],
+            status=anime_info['status'],
+            img=anime_info['image']
+        )
+        
+        # Display episode range information only if we have valid data
+        if jsonpage_dict and 'data' in jsonpage_dict and jsonpage_dict['data']:
+            print(f"\n{Fore.MAGENTA}📺 Available Episodes:{Style.RESET_ALL}")
+            print(f"   {Fore.GREEN}First:{Style.RESET_ALL} {anime_info['first_episode']}")
+            print(f"   {Fore.GREEN}Last:{Style.RESET_ALL}  {anime_info['last_episode']}")
+            print(f"   {Fore.GREEN}Total:{Style.RESET_ALL} {anime_info['episode_count']} episodes")
+        else:
+            print(f"\n{Fore.YELLOW}⚠️  Episode information temporarily unavailable{Style.RESET_ALL}")
+        
+        # Print available commands with better styling
+        print(f"\n{Fore.BLUE}🔧 Available Commands:{Style.RESET_ALL}")
+        print(f"   {Fore.CYAN}➤ Download:{Style.RESET_ALL} {Fore.YELLOW}-d{Style.RESET_ALL} <episode_number>  (e.g., {Fore.YELLOW}-d 1{Style.RESET_ALL})")
+        print(f"   {Fore.CYAN}➤ Multi-download:{Style.RESET_ALL} {Fore.YELLOW}-md{Style.RESET_ALL} <range>  (e.g., {Fore.YELLOW}-md 1-12{Style.RESET_ALL})")
+        print(f"   {Fore.CYAN}➤ Get links:{Style.RESET_ALL} {Fore.YELLOW}-l{Style.RESET_ALL} <episode>  (e.g., {Fore.YELLOW}-l 1{Style.RESET_ALL})")
+        print(f"   {Fore.CYAN}➤ Back to search:{Style.RESET_ALL} {Fore.YELLOW}-s{Style.RESET_ALL} <new_search>")
+        print()
+        
+        # Combine response data for further processing
+        if jsonpage_dict:
+            final_data = {**search_response_dict, **jsonpage_dict}
+        else:
+            final_data = search_response_dict
+        return final_data
+        
+    except IndexError:
+        logging.error(f"Invalid anime index: {arg}. Please select a valid number.")
+        return None
+    except Exception as e:
+        logging.error(f"Error in index function: {e}")
+        if 'search_response_dict' not in globals() or not search_response_dict:
+            logging.error("No search results available. Please perform a search first.")
+        return None
 
 def about():
-        #extract the anime info from a div with class anime-synopsis
-        ep_page = driver_output(episode_page_format,driver=True,content=True)
-        soup = BeautifulSoup(ep_page,'lxml')
+        # Prefer prefetched HTML if available
+        html = _prefetched_pages.get(episode_page_format)
+        if not html:
+            html = driver_output(episode_page_format, driver=True, content=True)
+        soup = BeautifulSoup(html, 'lxml')
         abt = soup.select('.anime-synopsis')
-
-        return abt[0].text.strip()
+        return abt[0].text.strip() if abt else ''
 
 
 
@@ -381,18 +397,12 @@ def about():
 
 def download(arg=1, download_file=True, res = "720"):
     """
-    Downloads the specified episode of the anime by navigating through the webpage using Selenium 
-    and extracting the download link.
+    Download the specified episode by navigating with Playwright and extracting the download link.
     """
     
-
-    driver = None
     try:
         # Convert the argument to an integer to ensure it is in the correct format
         arg = int(arg)
-
-        # Initializing driver
-        driver = browser()
 
         # Retrieve the session ID for the selected episode from the global jsonpage_dict
         episode_session = jsonpage_dict['data'][arg - 1]['session']
@@ -400,17 +410,16 @@ def download(arg=1, download_file=True, res = "720"):
         # Construct the URL for the stream page for the specific episode using the session ID
         stream_page_url = f'https://animepahe.com/play/{session_id}/{episode_session}'
 
-        # Open the stream page URL in the browser
-        driver.get(stream_page_url)
-
-        # Set an implicit wait for elements to load before interacting with the page
-        driver.implicitly_wait(10)
-
-        # Pause briefly to ensure the page has time to load
-        time.sleep(15)
-
-        # Parse the page content into a BeautifulSoup object for easier scraping
-        stream_page_soup = BeautifulSoup(driver.page_source, 'lxml')
+        # Navigate with shared Playwright context and extract links then the kwik page
+        browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or 'chrome').lower()
+        context = get_pw_context(browser_choice, headless=False)
+        if context is None:
+            logging.error("Playwright context not available")
+            return
+        page = context.new_page()
+        page.goto(stream_page_url, wait_until='domcontentloaded', timeout=60000)
+        page.wait_for_timeout(15000)
+        stream_page_soup = BeautifulSoup(page.content(), 'lxml')
 
         # Find all the download links in the page using the specified class name
         dload = stream_page_soup.find_all('a', class_='dropdown-item', target="_blank")
@@ -430,46 +439,31 @@ def download(arg=1, download_file=True, res = "720"):
             key=lambda url: int(re.search(r'(\d{3,4})p', url).group(1)) if re.search(r'(\d{3,4})p', url) else float('inf')
         )
 
-
         print(linkpahe)
 
         # If a valid download link is found, proceed with the next steps
         if not linkpahe:
+            page.close()
             raise ValueError(f"No valid download link found for episode {arg}")
 
         # Navigate to the selected download link
         res = str(res)
-        if res == "720":
-            driver.get(linkpahe[0])
+        if res == '720':
+            page.goto(linkpahe[0], wait_until='domcontentloaded', timeout=60000)
         elif res == '1080':
-            driver.get(linkpahe[-1])
+            page.goto(linkpahe[-1], wait_until='domcontentloaded', timeout=60000)
         else:
-            driver.get(linkpahe[1])
-        
-        # Pause to allow the new page to load
-        time.sleep(10)
+            target = linkpahe[1] if len(linkpahe) > 1 else linkpahe[0]
+            page.goto(target, wait_until='domcontentloaded', timeout=60000)
 
-        # Retrieve the page source of the new page (now the actual download page)
-        kwik_page = driver.page_source
-
-    except WebDriverException as e:
-        # Log browser-related errors
-        logging.error(f"Episode {arg} failed: {e}")
-        if driver:
-            driver.quit()
-        return
+        page.wait_for_timeout(10000)
+        kwik_page = page.content()
+        page.close()
 
     except Exception as e:
         # Log general errors
         logging.error(f"Episode {arg} failed: {e}")
-        if driver:
-            driver.quit()
         return
-
-    finally:
-        # Closing opened driver instance
-        if driver:
-            driver.quit()
 
     # Parse the page content to extract the actual download link (from kwik.cx)
     kwik_cx = BeautifulSoup(kwik_page, 'lxml')
@@ -568,62 +562,59 @@ def multi_download(arg: str, download_file=True, resolution="720", max_workers=1
 
 #
 # Function to handle user interaction and guide them through the anime selection and download process
-def interactive_main(driver):
-    # Prompt the user to select their preferred browser (e.g., chrome or firefox)
-    choice = str(input("Enter your favorite browser [e.g chrome] >> "))
-
-    # Prompt the user to search for an anime by name
-    lookup_anime = str(input("\nSearch an anime [e.g 'one piece'] >> "))
-
-    # Call the lookup function to search for the anime
+def interactive_main():
+    """Interactive mode for users who prefer guided input.
+    
+    Prompts for search, selection, and download options step-by-step.
+    """
+    # Display header banner
+    Banners.header()
+    
+    print("\n=== Interactive Mode ===")
+    print("Tip: Use command-line args for faster operation (try --help)\n")
+    
+    # Search for anime
+    lookup_anime = input("Search for anime: ").strip()
+    if not lookup_anime:
+        print("No search term provided. Exiting.")
+        return
+    
     lookup(lookup_anime)
-
-    # Prompt the user to select an anime index from the search results (default is 0)
-    select_index = int(input("Select anime index [default : 0] >> "))
     
-    # Call the index function to handle metadata of the selected anime
-    index(select_index)
+    # Select anime from results
+    try:
+        select_index = int(input("\nSelect anime index [default: 0]: ") or "0")
+        index(select_index)
+    except (ValueError, IndexError) as e:
+        print(f"Invalid selection: {e}")
+        return
     
-    # Get summary info about the selected anime
+    # Display anime info
     info = about()
-    # Display the anime information using the Banners class
     Banners.i_info(info)
-
-    # Prompt the user for the type of download they want
-    download_type = str(input("""
-    Enter the type of download facility you want:
     
-    1. s or single_download for single episode download
-    2. md or multi_download for multi episode download
-    3. v or md_verbose for a verbose variant of the md function [SLOW]
-    4. i for more in-depth info on the options above 
+    # Download selection
+    print("\nDownload Options:")
+    print("  1 or 's'  - Single episode")
+    print("  2 or 'md' - Multiple episodes")
+    print("  3 or 'a'  - View about/info")
     
-    >> """))
+    download_type = input("\nSelect option: ").strip().lower()
     
-    # Prompt for the episode(s) to download
-    ep_to_download = (input("Enter episode(s) to download >> "))
-
-    # A dictionary mapping the download type to the corresponding function
-    switch = {
-        "1": download,  # Single download
-        "2": multi_download,  # Multi download
-        "4": info,  # Display info
-        's': download,  # Single download alias
-        'md': multi_download,  # Multi download alias
-        'i': info,  # Info alias
-        'single_download': download,  # Single download alias
-        'multi_download': multi_download,  # Multi download alias
-        'info': info  # Info alias
-    }
-
-    # Retrieve the function based on the user's choice and execute it
-    selected_function = switch.get(download_type)
-
-    # If the function is valid, execute it, otherwise print an error
-    if selected_function:
-        selected_function(ep_to_download,driver)
+    if download_type in ['1', 's', 'single']:
+        ep = input("Episode number: ")
+        if ep.isdigit():
+            download(int(ep), download_file=True)
+            process_record(records, update=True, quiet=True)
+    elif download_type in ['2', 'md', 'multi']:
+        eps = input("Episodes (e.g., 1-5 or 1,3,5): ")
+        multi_download(eps, download_file=True)
+        process_record(records, update=True, quiet=True)
+    elif download_type in ['3', 'a', 'about']:
+        # Info already displayed above
+        pass
     else:
-        print("Invalid input. Please select a valid option.")
+        print("Invalid option selected.")
 
 
 def command_main(args):
@@ -665,10 +656,9 @@ def command_main(args):
     # Reset the run count
     reset_run_count()
 
-    # Init browser
-    if barg:
-        browser(barg)
-
+    # Note: Browser is only launched when actually needed (during downloads)
+    # This avoids unnecessary resource usage and startup delays
+    
     # Handle cache commands
     if cache_cmd:
         if cache_cmd == 'clear':
@@ -692,24 +682,74 @@ def command_main(args):
             logging.error("Search failed. Exiting.")
             return
 
+        # Ensure search results are visible before selection output when -i is also provided
+        if iarg is not None and search_response_dict and 'data' in search_response_dict:
+            print()
+            print(f"{Fore.GREEN}🎬 Found {len(search_response_dict['data'])} results{Style.RESET_ALL} {Fore.CYAN}--->{Style.RESET_ALL}")
+            print()
+            for el in range(len(search_response_dict['data'])):
+                name = search_response_dict['data'][el]['title']
+                episodenum = search_response_dict['data'][el]['episodes']
+                status = search_response_dict['data'][el]['status']
+                year = search_response_dict['data'][el]['year']
+                anime_type = search_response_dict['data'][el].get('type', 'N/A')
+                type_emoji = {'TV': '📺', 'Movie': '🎬', 'ONA': '💻', 'OVA': '📀'}.get(anime_type, '📺')
+                status_color = {
+                    'Finished Airing': Fore.GREEN,
+                    'Currently Airing': Fore.YELLOW,
+                    'Not yet aired': Fore.RED
+                }.get(str(status), Fore.WHITE)
+                print(f"{Fore.MAGENTA}[{el}]{Style.RESET_ALL} {type_emoji} {Fore.CYAN}{name}{Style.RESET_ALL}")
+                print(f"   {Fore.BLUE}├─ Episodes:{Style.RESET_ALL} {Fore.YELLOW}{episodenum}{Style.RESET_ALL}")
+                print(f"   {Fore.BLUE}├─ Status:{Style.RESET_ALL} {status_color}{status}{Style.RESET_ALL}")
+                print(f"   {Fore.BLUE}├─ Year:{Style.RESET_ALL} {Fore.YELLOW}{year}{Style.RESET_ALL}")
+                print(f"   {Fore.BLUE}└─ Type:{Style.RESET_ALL} {Fore.YELLOW}{anime_type}{Style.RESET_ALL}")
+                print()
+
     # Index function
     if iarg is not None:
         if not search_response_dict or 'data' not in search_response_dict or len(search_response_dict['data']) <= iarg:
             logging.error(f"Invalid index {iarg}. Search returned no results or index out of range.")
             return
+
+        # Prefetch episode JSON and anime page HTML using a shared Playwright context
+        try:
+            selected = search_response_dict['data'][iarg]
+            # Set globals required by downstream functions
+            global session_id, episode_page_format, animepicked
+            animepicked = selected.get('title')
+            session_id = selected.get('session')
+            episode_page_format = f'https://animepahe.com/anime/{session_id}'
+            anime_url_format = f'https://animepahe.com/api?m=release&id={session_id}&sort=episode_asc&page=1'
+
+            # Prefetch JSON (episodes)
+            json_results = batch_driver_output([anime_url_format], json=True, wait_time=5)
+            if json_results and anime_url_format in json_results and json_results[anime_url_format]:
+                _episode_cache[anime_url_format] = json_results[anime_url_format]
+                cache_set(anime_url_format, json_results[anime_url_format])
+
+            # Prefetch HTML (about page)
+            html_results = batch_driver_output([episode_page_format], content=True, wait_time=5)
+            if html_results and episode_page_format in html_results and html_results[episode_page_format]:
+                _prefetched_pages[episode_page_format] = html_results[episode_page_format]
+        except Exception as e:
+            logging.debug(f"Prefetch skipped due to: {e}")
+
+        # Now render index using the prefetched caches (no extra browser work)
         index(iarg)
         search_response_dict["data"][iarg]["anime_page"] = episode_page_format
         records.append(search_response_dict['data'][iarg])
-        process_record(records)
+        process_record(records, quiet=True)
 
     # About function
     if abtarg:
         info = about()
-        records.append(info)
-        print(records)
-
-        process_record(records, update=True)
-        Banners.anime_info(animepicked, info)
+        if info:
+            # Don't print the records list, just process it silently
+            process_record(records, update=True, quiet=True)
+            Banners.anime_info(animepicked, info)
+        else:
+            logging.error("Could not fetch anime information.")
 
     
 
@@ -718,13 +758,13 @@ def command_main(args):
     if sdarg:
         records.append(sdarg)
         download(sdarg,res=parg)
-        process_record(records, update=True)
+        process_record(records, update=True, quiet=True)
         did_download = True
 
     if larg:
         records.append(larg)
         download(larg , download_file=False,res=parg)
-        process_record(records, update=True)
+        process_record(records, update=True, quiet=True)
 
 
     # Handle batch/season selection
@@ -741,13 +781,13 @@ def command_main(args):
     if mdarg:
         records.append(mdarg)
         multi_download(mdarg,download_file=True,resolution=parg, max_workers=args.workers, enable_notifications=enable_notifications)
-        process_record(records, update=True)
+        process_record(records, update=True, quiet=True)
         did_download = True
 
     if mlarg:
         records.append(mlarg)
         multi_download(mlarg,download_file=False,resolution=parg, max_workers=args.workers, enable_notifications=enable_notifications)
-        process_record(records, update=True)
+        process_record(records, update=True, quiet=True)
         did_download = True
 
     
@@ -889,13 +929,14 @@ def command_main(args):
         watching = sum(1 for v in db.values() if 'Watching' in str(v.get('status','')))
         not_started = sum(1 for v in db.values() if 'Not Started' in str(v.get('status','')))
         print(f"\nRecords summary: total={total}, completed={completed}, watching={watching}, not_started={not_started}")
+    
+    # Clean up browser after all operations are complete
+    cleanup_browsers()
 
 
 
 # Main entry point for the script that processes arguments and triggers the appropriate actions
 def main():
-
-
     # Reset the run count to start fresh
     reset_run_count()
 
@@ -923,31 +964,55 @@ def main():
     global APP_CONFIG
     APP_CONFIG = cfg
 
+    # Set default browser from config or environment
+    default_browser = cfg.get('browser', 'chrome')  # Config takes precedence over env
+    # Only use env if no config setting
+    if not cfg.get('browser') and os.environ.get('AUTOPAHE_BROWSER'):
+        default_browser = os.environ.get('AUTOPAHE_BROWSER')
+    
     # Argument parser setup to handle command-line inputs
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-b', '--browser', default=cfg.get('browser','firefox'), help='Select the desired browser (chrome or firefox).')
-    parser.add_argument('-s', '--search', type=str, help='Search for an anime by name.')
-    parser.add_argument('-i', '--index', type=int, help='Specify the index of the desired anime from the search results.')
-    parser.add_argument('-d', '--single_download', type=int, help='Download a single episode of an anime.')
-    parser.add_argument('-md', '--multi_download', help='Download multiple episodes of an anime.')
+    parser = argparse.ArgumentParser(description='AutoPahe - Anime downloader with advanced features')
+    parser.add_argument('-b', '--browser', default=default_browser, 
+                      choices=['chrome', 'chromium', 'firefox'],
+                      help=f'Select Playwright browser (default: {default_browser})')
+    parser.add_argument('-s', '--search', type=str, help='Search for an anime by name')
+    parser.add_argument('-i', '--index', type=int, help='Specify the index of the desired anime from the search results')
+    parser.add_argument('-d', '--single_download', type=int, help='Download a single episode of an anime')
+    parser.add_argument('-md', '--multi_download', help='Download multiple episodes of an anime (e.g., 1-12)')
     parser.add_argument('-l', '--link', help='Display the link to the kwik download page')
-    parser.add_argument('-ml', '--multilinks', help='Display the multiple links to the kwik download page')
+    parser.add_argument('-ml', '--multilinks', help='Display multiple links to the kwik download pages')
     parser.add_argument('-a', '--about', help='Output an overview of the anime', action='store_true')
-    parser.add_argument('-p', '--resolution', type=str, default=str(cfg.get('resolution','720')), help='Provides resolution option for downloads')
-    parser.add_argument('-w', '--workers', type=int, default=int(cfg.get('workers','1')), help='Number of parallel workers for multi-episode downloads (use >1 with caution)')
-    parser.add_argument('-r', '--record', help='Interact with the records/database (view, [index], [keyword]).')
-    parser.add_argument('-R', '--records', nargs='+', help='Robust records management. Examples: -R view | -R search naruto | -R delete 3 | -R progress 3 27 | -R rate 3 8.5 | -R rename 3 "New Title" | -R set-keyword 3 naruto | -R list-status completed | -R export out.json json | -R import in.json')
-    parser.add_argument('--sort', choices=['all','rename','organize'], help='Sort downloaded files (integrates pahesort).')
+    parser.add_argument('-p', '--resolution', type=str, 
+                      default=str(cfg.get('resolution', '720')), 
+                      choices=['360', '480', '720', '1080', 'best', 'worst'],
+                      help='Video resolution for downloads (default: 720)')
+    parser.add_argument('-w', '--workers', type=int, 
+                      default=int(cfg.get('workers', '1')), 
+                      help='Number of parallel workers for multi-episode downloads (use >1 with caution)')
+    
+    # Records management
+    parser.add_argument('-r', '--record', help='Interact with the records/database (view, [index], [keyword])')
+    parser.add_argument('-R', '--records', nargs='+', 
+                      help='Robust records management. Examples: -R view | -R search naruto | -R delete 3 | -R progress 3 27 | -R rate 3 8.5 | -R rename 3 "New Title" | -R set-keyword 3 naruto | -R list-status completed | -R export out.json json | -R import in.json')
+    
+    # File organization
+    parser.add_argument('--sort', choices=['all', 'rename', 'organize'], 
+                      help='Sort downloaded files (integrates pahesort)')
     parser.add_argument('--sort-path', help='Path to sort; defaults to Downloads')
     parser.add_argument('--sort-dry-run', action='store_true', help='Dry-run sorting (no changes)')
-    parser.add_argument('--summary', help='Show execution stats and records summary; accepts same formats as --execution_data')
     
-    # Phase 2/3/4 enhancements
+    # Additional features
+    parser.add_argument('--summary', help='Show execution stats and records summary')
     parser.add_argument('--year', type=int, help='Filter search results by year (e.g., 2020)')
     parser.add_argument('--status', type=str, help='Filter search results by status (e.g., "Finished Airing")')
     parser.add_argument('--season', type=int, help='Download entire season (12-13 eps). Example: --season 1 downloads eps 1-12')
     parser.add_argument('--notify', action='store_true', help='Enable desktop notifications on download complete/fail')
     parser.add_argument('--cache', choices=['clear', 'stats'], help='Cache management: clear (remove all) or stats (show info)')
+    
+    # Set browser from command line args
+    args = parser.parse_args(remaining)
+    # Always set the browser environment variable
+    os.environ['AUTOPAHE_BROWSER'] = args.browser or default_browser
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging (DEBUG level)')
     parser.add_argument('--quiet', action='store_true', help='Minimal logging (WARNING level only)')
     
@@ -976,11 +1041,46 @@ def main():
     elif args.quiet:
         logging.getLogger().setLevel(logging.WARNING)
 
-    # If any arguments are provided, process them using command_main
+    # Propagate browser choice to Playwright via env
+    try:
+        if args.browser:
+            os.environ['AUTOPAHE_BROWSER'] = str(args.browser).lower()
+    except Exception:
+        pass
+
+    # If any arguments are provided, show banner and process them using command_main
     if any(vars(args).values()):
+        try:
+            Banners.header()
+        except Exception:
+            pass
         command_main(args)
     else:
-        # If no arguments are provided, run the interactive main function
+        try:
+            os.system('cls' if os.name == 'nt' else 'clear')
+        except Exception:
+            pass
+        try:
+            Banners.header()
+        except Exception:
+            pass
+        print("\nNo arguments provided. Try these options:\n")
+        print("  -s, --search <query>          Search for anime")
+        print("  -i, --index <n>               Select anime index from search results")
+        print("  -d, --single_download <ep>    Download a single episode")
+        print("  -md, --multi_download <spec>  Download multiple episodes (e.g., 1-5 or 1,3,5)")
+        print("  -a, --about                   Show anime overview")
+        print("  -p, --resolution <720|1080>   Choose resolution")
+        print("  -w, --workers <n>             Parallel downloads (use >1 with caution)")
+        print("  -R, --records [...]           Manage records (view/search/delete/...)")
+        print("      --sort [all|rename|organize]  Sort downloaded files")
+        print("      --cache [clear|stats]     Manage cache and cookies")
+        print("      --year <YYYY>             Filter by year")
+        print("      --status <text>           Filter by status (e.g., Finished Airing)")
+        print("      --season <n>              Download a whole season (12-13 eps)")
+        print("      --notify                  Enable desktop notifications")
+        print("      --verbose | --quiet       Adjust logging verbosity\n")
+        print("Launching Interactive Mode...\n")
         interactive_main()
 
     # Log the execution time once the script has finished
@@ -995,7 +1095,4 @@ def main():
 # If the script is executed directly, call the main function
 if __name__ == '__main__':
     main()
-else:
-    # If the script is imported as a module, display the header
-    Banners.header()
 

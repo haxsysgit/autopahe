@@ -1,7 +1,6 @@
 """
 Desktop notifications for download completion
 """
-import os
 import sys
 import subprocess
 

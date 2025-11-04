@@ -37,11 +37,18 @@ Homepage = "https://github.com/haxsysgit/autopahe"
 Repository = "https://github.com/haxsysgit/autopahe"
 Issues = "https://github.com/haxsysgit/autopahe/issues"
 
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+publish = ["build>=1.2.0", "twine>=4.0.2"]
+
 [project.scripts]
 autopahe = "auto_pahe:main"
 
 [tool.setuptools.packages.find]
 include = ["ap_core*", "features*"]
+
+[tool.setuptools]
+py-modules = ["auto_pahe", "kwikdown"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

@@ -3,9 +3,11 @@
 
 # Standard library imports
 import os
+import sys
 import time
 import argparse
 import logging
+import subprocess
 import atexit
 from pathlib import Path
 from json import loads,dumps
@@ -21,7 +23,7 @@ import requests
 from bs4 import BeautifulSoup
 
 # Local imports - Core functionality
-from ap_core.banners import Banners, n
+from ap_core.banners import Banners
 from ap_core.browser import driver_output, cleanup_browsers, get_request_session, get_pw_context, batch_driver_output
 from ap_core.config import load_app_config, write_sample_config
 from ap_core.cache import cache_get, cache_set, cache_clear, get_cache_stats
@@ -94,6 +96,29 @@ atexit.register(cleanup_browsers)
 
 
 
+def setup_environment():
+    """First-time setup to make the CLI runnable system-wide."""
+    try:
+        default_path = Path.home() / '.config' / 'autopahe' / 'config.ini'
+        write_sample_config(str(default_path))
+        print(f"✓ Sample config written to: {default_path}")
+    except Exception as e:
+        print(f"Config setup skipped: {e}")
+    try:
+        os.environ['AUTOPAHE_BROWSER'] = 'chrome'
+    except Exception:
+        pass
+    try:
+        # Prefer Chrome CfT to match default; fallback to Chromium
+        rc = subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chrome'], check=False)
+        if getattr(rc, 'returncode', 1) != 0:
+            subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chromium'], check=False)
+    except Exception:
+        print("Playwright not available; skipping browser install.")
+    print("Setup complete.")
+    return True
+
+
 def lookup(arg, year_filter=None, status_filter=None):
     """Search for anime using AnimePahe API with filters.
     
@@ -112,7 +137,7 @@ def lookup(arg, year_filter=None, status_filter=None):
     Banners.search(arg)
     print()  # Use regular print instead of n() which might clear screen
 
-    # API endpoint for search
+    # API endpoint for search (prefer .si, fallback to .com)
     api_url = f'https://animepahe.si/api?m=search&q={arg}'
     search_response = None
 
@@ -126,14 +151,26 @@ def lookup(arg, year_filter=None, status_filter=None):
         else:
             # Step 2: Try direct HTTP request (fast, no browser needed)
             logging.debug("Fetching from API...")
-            response = requests.get(api_url, timeout=10)
-            if response.status_code == 200:
-                search_response = response.content
-                # Save to disk cache for future use
-                cache_set(api_url, search_response)
-                logging.debug("✓ Fetched from API and cached")
-            else:
-                logging.warning(f"API returned status {response.status_code}")
+            session = get_request_session()
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
+                'Accept': 'application/json'
+            }
+            for base in ("https://animepahe.si", "https://animepahe.com", "https://animepahe.ru"):
+                try:
+                    url = f"{base}/api"
+                    response = session.get(url, params={"m":"search","q":arg}, headers=headers, timeout=15)
+                    if response.status_code == 200 and response.content:
+                        search_response = response.content
+                        # Normalize api_url to the working domain for downstream/fallbacks
+                        api_url = response.url
+                        cache_set(api_url, search_response)
+                        logging.debug(f"✓ Fetched from API and cached ({base})")
+                        break
+                    else:
+                        logging.warning(f"API {base} returned status {response.status_code}")
+                except Exception as _e:
+                    logging.debug(f"Fetch attempt on {base} failed: {_e}")
 
         # Parse response if we got one
         if search_response:
@@ -163,15 +200,21 @@ def lookup(arg, year_filter=None, status_filter=None):
         except Exception:
             search_response_dict = {'data': []}
     except Exception as e:
-        logging.error(f"Unexpected error: {e}")
-        search_response_dict = {'data': []}
+        logging.warning(f"Parsing/API error ({e}); trying Playwright fallback...")
+        try:
+            search_response = driver_output(api_url, driver=True, json=True, wait_time=5)
+            if search_response:
+                search_response_dict = search_response
+            else:
+                search_response_dict = {'data': []}
+        except Exception:
+            search_response_dict = {'data': []}
 
     # Check if results exist
     if not search_response_dict or 'data' not in search_response_dict or not search_response_dict['data']:
-        Banners.header()
         logging.error("No results found. Please try a different search term.")
         print("\n❌ No anime found matching your search.\n")
-        return
+        return None
     
     # Debug: Show we have results
     logging.info(f"Processing {len(search_response_dict['data'])} search results")
@@ -195,7 +238,6 @@ def lookup(arg, year_filter=None, status_filter=None):
     search_response_dict['data'] = results
     
     if not results:
-        Banners.header()
         print(f"\n❌ No anime found matching your search with the given filters.\n")
         print("💡 Tips:")
         print("   - Try different spelling or formatting")
@@ -211,7 +253,7 @@ def lookup(arg, year_filter=None, status_filter=None):
     if '_from_cache' in globals() and _from_cache:
         cache_indicator = f" {Fore.GREEN}⚡{Style.RESET_ALL}"
     
-    print(f'{Fore.GREEN}🎬 Found {resultlen} results{cache_indicator}{Style.RESET_ALL} {Fore.CYAN}--->{Style.RESET_ALL}')
+    print(f"{Fore.GREEN}{resultlen}{Style.RESET_ALL} results were found  {cache_indicator}{Fore.CYAN}--->{Style.RESET_ALL}")
     print()
 
     for el in range(len(search_response_dict['data'])):
@@ -219,28 +261,17 @@ def lookup(arg, year_filter=None, status_filter=None):
         episodenum = search_response_dict['data'][el]['episodes']
         status = search_response_dict['data'][el]['status']
         year = search_response_dict['data'][el]['year']
-        anime_type = search_response_dict['data'][el].get('type', 'N/A')
-        
-        # Type emoji mapping
-        type_emoji = {
-            'TV': '📺',
-            'Movie': '🎬',
-            'ONA': '💻',
-            'OVA': '📀'
-        }.get(anime_type, '📺')
-        
         # Status color mapping
         status_color = {
             'Finished Airing': Fore.GREEN,
             'Currently Airing': Fore.YELLOW,
             'Not yet aired': Fore.RED
         }.get(str(status), Fore.WHITE)
-        
-        print(f'{Fore.MAGENTA}[{el}]{Style.RESET_ALL} {type_emoji} {Fore.CYAN}{name}{Style.RESET_ALL}')
-        print(f'   {Fore.BLUE}├─ Episodes:{Style.RESET_ALL} {Fore.YELLOW}{episodenum}{Style.RESET_ALL}')
-        print(f'   {Fore.BLUE}├─ Status:{Style.RESET_ALL} {status_color}{status}{Style.RESET_ALL}')
-        print(f'   {Fore.BLUE}├─ Year:{Style.RESET_ALL} {Fore.YELLOW}{year}{Style.RESET_ALL}')
-        print(f'   {Fore.BLUE}└─ Type:{Style.RESET_ALL} {Fore.YELLOW}{anime_type}{Style.RESET_ALL}')
+        print(f'{Fore.MAGENTA}[{el}]{Style.RESET_ALL} : {Fore.CYAN}{name}{Style.RESET_ALL}')
+        print('---------------------------------------------------------')
+        print(f'        {Fore.BLUE}Number of episodes contained{Style.RESET_ALL} : {Fore.YELLOW}{episodenum}{Style.RESET_ALL}')
+        print(f'        {Fore.BLUE}Current status of the anime{Style.RESET_ALL} : {status_color}{status}{Style.RESET_ALL}')
+        print(f'        {Fore.BLUE}Year the anime aired{Style.RESET_ALL} : {Fore.YELLOW}{year}{Style.RESET_ALL}')
         print()
 
     print()  # Add spacing instead of clearing screen
@@ -348,22 +379,14 @@ def index(arg):
             status=anime_info['status'],
             img=anime_info['image']
         )
-        
-        # Display episode range information only if we have valid data
-        if jsonpage_dict and 'data' in jsonpage_dict and jsonpage_dict['data']:
-            print(f"\n{Fore.MAGENTA}📺 Available Episodes:{Style.RESET_ALL}")
-            print(f"   {Fore.GREEN}First:{Style.RESET_ALL} {anime_info['first_episode']}")
-            print(f"   {Fore.GREEN}Last:{Style.RESET_ALL}  {anime_info['last_episode']}")
-            print(f"   {Fore.GREEN}Total:{Style.RESET_ALL} {anime_info['episode_count']} episodes")
-        else:
-            print(f"\n{Fore.YELLOW}⚠️  Episode information temporarily unavailable{Style.RESET_ALL}")
+
         
         # Print available commands with better styling
-        print(f"\n{Fore.BLUE}🔧 Available Commands:{Style.RESET_ALL}")
-        print(f"   {Fore.CYAN}➤ Download:{Style.RESET_ALL} {Fore.YELLOW}-d{Style.RESET_ALL} <episode_number>  (e.g., {Fore.YELLOW}-d 1{Style.RESET_ALL})")
-        print(f"   {Fore.CYAN}➤ Multi-download:{Style.RESET_ALL} {Fore.YELLOW}-md{Style.RESET_ALL} <range>  (e.g., {Fore.YELLOW}-md 1-12{Style.RESET_ALL})")
-        print(f"   {Fore.CYAN}➤ Get links:{Style.RESET_ALL} {Fore.YELLOW}-l{Style.RESET_ALL} <episode>  (e.g., {Fore.YELLOW}-l 1{Style.RESET_ALL})")
-        print(f"   {Fore.CYAN}➤ Back to search:{Style.RESET_ALL} {Fore.YELLOW}-s{Style.RESET_ALL} <new_search>")
+        print(f"\n  {Fore.BLUE}🔧 Available Commands:{Style.RESET_ALL}")
+        print(f"    {Fore.CYAN}➤ Download:{Style.RESET_ALL} {Fore.YELLOW}-d{Style.RESET_ALL} <episode_number>  (e.g., {Fore.YELLOW}-d 1{Style.RESET_ALL})")
+        print(f"    {Fore.CYAN}➤ Multi-download:{Style.RESET_ALL} {Fore.YELLOW}-md{Style.RESET_ALL} <range>  (e.g., {Fore.YELLOW}-md 1-12{Style.RESET_ALL})")
+        print(f"    {Fore.CYAN}➤ Get links:{Style.RESET_ALL} {Fore.YELLOW}-l{Style.RESET_ALL} <episode>  (e.g., {Fore.YELLOW}-l 1{Style.RESET_ALL})")
+        print(f"    {Fore.CYAN}➤ Back to search:{Style.RESET_ALL} {Fore.YELLOW}-s{Style.RESET_ALL} <new_search>")
         print()
         
         # Combine response data for further processing
@@ -410,36 +433,34 @@ def download(arg=1, download_file=True, res = "720"):
         # Construct the URL for the stream page for the specific episode using the session ID
         stream_page_url = f'https://animepahe.com/play/{session_id}/{episode_session}'
 
-        # Navigate with shared Playwright context and extract links then the kwik page
+        # Navigate with shared Playwright context (headless) and extract links then the kwik page
         browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or 'chrome').lower()
-        context = get_pw_context(browser_choice, headless=False)
+        context = get_pw_context(browser_choice, headless=True)
         if context is None:
             logging.error("Playwright context not available")
             return
         page = context.new_page()
         page.goto(stream_page_url, wait_until='domcontentloaded', timeout=60000)
-        page.wait_for_timeout(15000)
-        stream_page_soup = BeautifulSoup(page.content(), 'lxml')
-
-        # Find all the download links in the page using the specified class name
-        dload = stream_page_soup.find_all('a', class_='dropdown-item', target="_blank")
-
+        # Wait for dropdown links to be present
+        try:
+            page.wait_for_selector('a.dropdown-item[target="_blank"]', timeout=30000)
+        except Exception:
+            pass
+        # Extract hrefs via JS for reliability
+        dload_hrefs = page.eval_on_selector_all('a.dropdown-item[target="_blank"]', 'els => els.map(e => e.href)') or []
         # Filters download links with resolution >= 720p and excludes 'eng' versions,
         # then sorts them starting from 720p up to the highest resolution available.
         linkpahe = sorted(
             [
-                BeautifulSoup(str(link), 'html.parser').a['href']
-                for link in dload
+                href for href in dload_hrefs
                 if (
-                    (m := re.search(r'(\d{3,4})p', str(link))) and 
+                    (m := re.search(r'(\d{3,4})p', str(href))) and 
                     int(m.group(1)) >= 720 and 
-                    'eng' not in str(link).lower()
+                    'eng' not in str(href).lower()
                 )
             ],
             key=lambda url: int(re.search(r'(\d{3,4})p', url).group(1)) if re.search(r'(\d{3,4})p', url) else float('inf')
         )
-
-        print(linkpahe)
 
         # If a valid download link is found, proceed with the next steps
         if not linkpahe:
@@ -456,8 +477,17 @@ def download(arg=1, download_file=True, res = "720"):
             target = linkpahe[1] if len(linkpahe) > 1 else linkpahe[0]
             page.goto(target, wait_until='domcontentloaded', timeout=60000)
 
-        page.wait_for_timeout(10000)
-        kwik_page = page.content()
+        # Wait for the kwik redirect anchor and extract href
+        try:
+            page.wait_for_selector('a.redirect', timeout=30000)
+            kwik = page.eval_on_selector('a.redirect', 'el => el.href')
+        except Exception:
+            # Fallback to HTML parse
+            page.wait_for_timeout(5000)
+            kwik_page = page.content()
+            kwik_cx = BeautifulSoup(kwik_page, 'lxml')
+            a = kwik_cx.find('a', class_='redirect')
+            kwik = a['href'] if a else None
         page.close()
 
     except Exception as e:
@@ -465,11 +495,10 @@ def download(arg=1, download_file=True, res = "720"):
         logging.error(f"Episode {arg} failed: {e}")
         return
 
-    # Parse the page content to extract the actual download link (from kwik.cx)
-    kwik_cx = BeautifulSoup(kwik_page, 'lxml')
-
-    # Extract the direct download link from the page (looking for the 'redirect' class)
-    kwik = kwik_cx.find('a', class_='redirect')['href']
+    # Ensure we have a valid kwik link
+    if not kwik:
+        logging.error("Failed to locate kwik redirect link")
+        return
 
     # Print the found download link to the terminal
     # print(f"\nEpisode {arg} Download link => {kwik}\n")
@@ -570,8 +599,8 @@ def interactive_main():
     # Display header banner
     Banners.header()
     
-    print("\n=== Interactive Mode ===")
-    print("Tip: Use command-line args for faster operation (try --help)\n")
+    print("\n=== Interactive Mode ===", flush=True)
+    print("Tip: Use command-line args for faster operation (try --help)\n", flush=True)
     
     # Search for anime
     lookup_anime = input("Search for anime: ").strip()
@@ -681,30 +710,6 @@ def command_main(args):
         if result is None:
             logging.error("Search failed. Exiting.")
             return
-
-        # Ensure search results are visible before selection output when -i is also provided
-        if iarg is not None and search_response_dict and 'data' in search_response_dict:
-            print()
-            print(f"{Fore.GREEN}🎬 Found {len(search_response_dict['data'])} results{Style.RESET_ALL} {Fore.CYAN}--->{Style.RESET_ALL}")
-            print()
-            for el in range(len(search_response_dict['data'])):
-                name = search_response_dict['data'][el]['title']
-                episodenum = search_response_dict['data'][el]['episodes']
-                status = search_response_dict['data'][el]['status']
-                year = search_response_dict['data'][el]['year']
-                anime_type = search_response_dict['data'][el].get('type', 'N/A')
-                type_emoji = {'TV': '📺', 'Movie': '🎬', 'ONA': '💻', 'OVA': '📀'}.get(anime_type, '📺')
-                status_color = {
-                    'Finished Airing': Fore.GREEN,
-                    'Currently Airing': Fore.YELLOW,
-                    'Not yet aired': Fore.RED
-                }.get(str(status), Fore.WHITE)
-                print(f"{Fore.MAGENTA}[{el}]{Style.RESET_ALL} {type_emoji} {Fore.CYAN}{name}{Style.RESET_ALL}")
-                print(f"   {Fore.BLUE}├─ Episodes:{Style.RESET_ALL} {Fore.YELLOW}{episodenum}{Style.RESET_ALL}")
-                print(f"   {Fore.BLUE}├─ Status:{Style.RESET_ALL} {status_color}{status}{Style.RESET_ALL}")
-                print(f"   {Fore.BLUE}├─ Year:{Style.RESET_ALL} {Fore.YELLOW}{year}{Style.RESET_ALL}")
-                print(f"   {Fore.BLUE}└─ Type:{Style.RESET_ALL} {Fore.YELLOW}{anime_type}{Style.RESET_ALL}")
-                print()
 
     # Index function
     if iarg is not None:
@@ -1008,11 +1013,9 @@ def main():
     parser.add_argument('--season', type=int, help='Download entire season (12-13 eps). Example: --season 1 downloads eps 1-12')
     parser.add_argument('--notify', action='store_true', help='Enable desktop notifications on download complete/fail')
     parser.add_argument('--cache', choices=['clear', 'stats'], help='Cache management: clear (remove all) or stats (show info)')
+    parser.add_argument('--setup', action='store_true', help='Initial setup: write config and install browser')
     
-    # Set browser from command line args
-    args = parser.parse_args(remaining)
-    # Always set the browser environment variable
-    os.environ['AUTOPAHE_BROWSER'] = args.browser or default_browser
+    # Verbosity flags
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging (DEBUG level)')
     parser.add_argument('--quiet', action='store_true', help='Minimal logging (WARNING level only)')
     
@@ -1033,6 +1036,17 @@ def main():
 
     # Parse the command-line arguments
     args = parser.parse_args(remaining)
+
+    # Set browser env after final parse
+    try:
+        os.environ['AUTOPAHE_BROWSER'] = (args.browser or default_browser)
+    except Exception:
+        pass
+
+    # One-shot setup
+    if getattr(args, 'setup', False):
+        setup_environment()
+        return
     
     # Configure logging level based on --verbose/--quiet
     if args.verbose:
@@ -1041,15 +1055,35 @@ def main():
     elif args.quiet:
         logging.getLogger().setLevel(logging.WARNING)
 
-    # Propagate browser choice to Playwright via env
-    try:
-        if args.browser:
-            os.environ['AUTOPAHE_BROWSER'] = str(args.browser).lower()
-    except Exception:
-        pass
+    # AUTOPAHE_BROWSER already set above from args/defaults
 
-    # If any arguments are provided, show banner and process them using command_main
-    if any(vars(args).values()):
+    # Determine if the user provided any actionable flags (ignore defaults)
+    has_action = any([
+        bool(args.search),
+        args.index is not None,
+        args.single_download is not None,
+        bool(args.multi_download),
+        bool(args.link),
+        bool(args.multilinks),
+        bool(args.about),
+        bool(args.record),
+        bool(args.records),
+        bool(args.sort),
+        bool(args.sort_path),
+        bool(args.sort_dry_run),
+        bool(args.cache),
+        bool(args.summary),
+        args.year is not None,
+        bool(args.status),
+        args.season is not None,
+        bool(args.notify),
+        bool(args.execution_data),
+        bool(args.config),
+        args.write_config is not None,
+    ])
+
+    # If actionable flags are provided, process them; otherwise go interactive
+    if has_action:
         try:
             Banners.header()
         except Exception:

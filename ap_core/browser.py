@@ -35,7 +35,7 @@ _pw = None
 _pw_context = None
 _driver_cache = {}
 
-def get_pw_context(browser_choice: str = None, headless: bool = False):
+def get_pw_context(browser_choice: str = None, headless: bool = True):
     """Return a shared Playwright persistent context (single OS window).
 
     Creates it on first use and reuses it afterwards so repeated calls do not
@@ -111,7 +111,7 @@ def driver_output(url: str, driver=False, content=False, json=False, wait_time=5
         if key in _driver_cache:
             return _driver_cache[key]
         browser_choice = (os.environ.get("AUTOPAHE_BROWSER") or "chrome").lower()
-        headless = False
+        headless = True
         context = get_pw_context(browser_choice, headless=headless)
         if context is None:
             return None
@@ -158,7 +158,7 @@ def batch_driver_output(urls, content=False, json=False, wait_time=5):
     """
     results = {}
     browser_choice = (os.environ.get("AUTOPAHE_BROWSER") or "chrome").lower()
-    context = get_pw_context(browser_choice, headless=False)
+    context = get_pw_context(browser_choice, headless=True)
     if context is None:
         for u in urls:
             results[u] = None

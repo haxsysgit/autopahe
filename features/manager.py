@@ -3,12 +3,12 @@ import os
 import csv
 
 cwd = os.path.dirname(os.path.abspath(__file__))
-json_dir = os.path.join(cwd, "json_data")  # Full path to "json_data"
-
+# Use central project-level json_data directory
+root_dir = os.path.dirname(cwd)
+json_dir = os.path.join(root_dir, "json_data")
 if not os.path.exists(json_dir):
-    os.mkdir(json_dir)
-
-DATABASE_FILE = os.path.join(cwd, "json_data/animerecord.json")
+    os.makedirs(json_dir, exist_ok=True)
+DATABASE_FILE = os.path.join(json_dir, "animerecord.json")
 
 
 def ensure_file_exists():

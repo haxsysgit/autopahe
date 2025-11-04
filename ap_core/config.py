@@ -9,7 +9,7 @@ DEFAULT_LOCATIONS = [
 ]
 
 DEFAULTS = {
-    "browser": "firefox",
+    "browser": "chrome",
     "resolution": "720",
     "workers": "1",
     "download_dir": "",
@@ -64,8 +64,8 @@ def sample_config_text() -> str:
     return (
         """# AutoPahe configuration
 [defaults]
-# Default browser: firefox or chrome
-browser = firefox
+# Default browser: chrome or firefox
+browser = chrome
 
 # Default resolution: 480, 720, 1080
 resolution = 720

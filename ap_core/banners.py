@@ -68,7 +68,13 @@ class Banners:
         """Display anime selection in structured webpage format"""
         Banners.section_header("Anime Information", "📺")
         
-        print(f"        {Fore.CYAN}{anime_data['title']}{Style.RESET_ALL}")
+        # Center the anime title under the separator
+        title = anime_data['title']
+        separator_length = 60
+        padding = (separator_length - len(title)) // 2
+        centered_title = " " * padding + f"{Fore.CYAN}{title}{Style.RESET_ALL}"
+        
+        print(f"        {centered_title}")
         print("        " + "-" * 60)
         print(f"        {Fore.BLUE}Episodes Available{Style.RESET_ALL} : {Fore.YELLOW}{anime_data.get('episodes', 'N/A')}{Style.RESET_ALL}")
         print(f"        {Fore.BLUE}Anime Homepage{Style.RESET_ALL} : {Fore.CYAN}{anime_data.get('homepage', 'N/A')}{Style.RESET_ALL}")
@@ -98,6 +104,7 @@ class Banners:
 
     def success_message(message):
         """Display success message in structured format"""
+        print()  # Add spacing before success message
         print(f"        {Fore.GREEN}✅ {message}{Style.RESET_ALL}")
         print()
 
@@ -116,7 +123,6 @@ class Banners:
         }
         
         print(indicators.get(status, indicators["loading"]))
-        print()
 
     def search(anime=None):
         print(f'''

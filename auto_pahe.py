@@ -22,6 +22,35 @@ init()
 import requests
 from bs4 import BeautifulSoup
 
+# Rich imports for loading spinner
+from rich.console import Console
+from rich.spinner import Spinner
+from rich.live import Live
+import threading
+import time
+
+# Initialize rich console
+console = Console()
+
+class LoadingSpinner:
+    """Context manager for showing loading spinner during operations"""
+    def __init__(self, text="Searching...", spinner_style="dots"):
+        self.text = text
+        self.spinner_style = spinner_style
+        self.spinner = Spinner(spinner_style, text=text)
+        self.live = Live(self.spinner, console=console, refresh_per_second=10)
+        
+    def __enter__(self):
+        self.live.start()
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.live.stop()
+        
+    def update_text(self, text):
+        """Update spinner text"""
+        self.spinner.text = text
+
 # Local imports - Core functionality
 from ap_core.banners import Banners
 from ap_core.browser import driver_output, cleanup_browsers, get_request_session, get_pw_context, batch_driver_output
@@ -155,10 +184,10 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
 
     try:
         # Step 1: Check disk cache FIRST for instant results
-        print("🔍 Checking cache...")
+        print(f"        🔍 Checking cache...")
         cached = cache_get(api_url, max_age_hours=24)
         if cached:
-            print(f"✅ Found cached data: {len(cached)} bytes")
+            print(f"        ✅ Found cached data: {len(cached)} bytes")
             search_response = cached
             _from_cache = True
             logging.debug("✓ Loaded from disk cache")
@@ -166,7 +195,7 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
             try:
                 # Parse cached response and return immediately (INSTANT ACCESS)
                 search_response_dict = loads(search_response)
-                print(f"✅ Parsed cached JSON successfully")
+                print(f"        ✅ Parsed cached JSON successfully")
                 logging.debug(f"Found {len(search_response_dict.get('data', []))} cached results")
                 
                 # Apply filters to cached results if provided
@@ -198,7 +227,7 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
                 # Display cached results using structured design
                 Banners.search_results(results, from_cache=True)
                 
-                print("⚡ INSTANT CACHE HIT - No browser/API used!")
+                print(f"        {Fore.YELLOW}⚡ Found cached result - No browser/API used!{Style.RESET_ALL}")
                 return search_response_dict  # EARLY RETURN - INSTANT CACHE HIT
                 
             except Exception as e:
@@ -211,28 +240,31 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
         # If not cached, proceed with network requests
         print("🔍 Searching (not cached)...")
         
-        # Step 2: Try direct HTTP request (fast, no browser needed)
+        # Step 2: Try direct HTTP request (fast, no browser needed) with loading spinner
         logging.debug("Fetching from API...")
-        session = get_request_session()
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
-            'Accept': 'application/json'
-        }
-        for base in ("https://animepahe.si", "https://animepahe.com", "https://animepahe.ru"):
-            try:
-                url = f"{base}/api"
-                response = session.get(url, params={"m":"search","q":arg}, headers=headers, timeout=15)
-                if response.status_code == 200 and response.content:
-                    search_response = response.content
-                    # Normalize api_url to the working domain for downstream/fallbacks
-                    api_url = response.url
-                    cache_set(api_url, search_response)
-                    logging.debug(f"✓ Fetched from API and cached ({base})")
-                    break
-                else:
-                    logging.warning(f"API {base} returned status {response.status_code}")
-            except Exception as _e:
-                logging.debug(f"Fetch attempt on {base} failed: {_e}")
+        
+        with LoadingSpinner("Searching anime...", "dots") as spinner:
+            session = get_request_session()
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
+                'Accept': 'application/json'
+            }
+            for base in ("https://animepahe.si", "https://animepahe.com", "https://animepahe.ru"):
+                try:
+                    spinner.update_text(f"Searching on {base}...")
+                    url = f"{base}/api"
+                    response = session.get(url, params={"m":"search","q":arg}, headers=headers, timeout=15)
+                    if response.status_code == 200 and response.content:
+                        search_response = response.content
+                        # Normalize api_url to the working domain for downstream/fallbacks
+                        api_url = response.url
+                        cache_set(api_url, search_response)
+                        logging.debug(f"✓ Fetched from API and cached ({base})")
+                        break
+                    else:
+                        logging.warning(f"API {base} returned status {response.status_code}")
+                except Exception as _e:
+                    logging.debug(f"Fetch attempt on {base} failed: {_e}")
 
         # Parse response if we got one
         if search_response:
@@ -241,16 +273,18 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
         else:
             # Step 3: Only use Playwright as last resort (slow, resource intensive)
             logging.warning("Direct API failed, falling back to Playwright...")
-            search_response = driver_output(api_url, driver=True, json=True, wait_time=5)
-            if search_response:
-                search_response_dict = search_response
-                # Cache the Playwright results as JSON bytes for future instant access
-                cache_set(api_url, dumps(search_response_dict).encode())
-                logging.debug(f"Playwright fallback succeeded and cached")
-                # Don't close browser yet - might need it for index/about operations
-            else:
-                logging.error("All methods failed to retrieve search results")
-                search_response_dict = {'data': []}
+            with LoadingSpinner("Loading browser for search...", "dots") as spinner:
+                spinner.update_text("Launching browser...")
+                search_response = driver_output(api_url, driver=True, json=True, wait_time=5)
+                if search_response:
+                    search_response_dict = search_response
+                    # Cache the Playwright results as JSON bytes for future instant access
+                    cache_set(api_url, dumps(search_response_dict).encode())
+                    logging.debug(f"Playwright fallback succeeded and cached")
+                    # Don't close browser yet - might need it for index/about operations
+                else:
+                    logging.error("All methods failed to retrieve search results")
+                    search_response_dict = {'data': []}
 
     except requests.exceptions.RequestException as e:
         # Network error - try Playwright fallback

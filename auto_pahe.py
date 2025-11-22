@@ -651,10 +651,15 @@ def download(arg=1, download_file=True, res = "720"):
     
 def multi_download(arg: str, download_file=True, resolution="720", max_workers=1, enable_notifications=False):
     """
-    Downloads multiple episodes using ThreadPoolExecutor.
-    Default is sequential (max_workers=1) for stability.
-    Increase max_workers for parallel downloads if your system can handle it.
+    Downloads multiple episodes sequentially.
+    Note: Parallel downloads disabled due to Playwright threading incompatibility.
+    Playwright's sync API uses greenlets which cannot be shared across ThreadPoolExecutor threads.
     """
+    # Force sequential downloads - Playwright is not thread-safe
+    if max_workers > 1:
+        Banners.info_message("⚠️ Parallel downloads disabled - Playwright requires sequential execution")
+    max_workers = 1
+    
     # Parse input like '2,3,5-7' into [2,3,5,6,7]
     eps = []
     for part in arg.split(','):
@@ -664,50 +669,20 @@ def multi_download(arg: str, download_file=True, resolution="720", max_workers=1
         elif part.isdigit():
             eps.append(int(part))
 
-    if max_workers == 1:
-        Banners.info_message(f"📥 Starting sequential download of {len(eps)} episodes")
-    else:
-        Banners.info_message(f"📥 Starting parallel download of {len(eps)} episodes with {max_workers} workers")
+    Banners.info_message(f"📥 Starting sequential download of {len(eps)} episodes")
     
-    # Progress tracking
-    try:
-        from tqdm import tqdm
-        use_tqdm = True
-    except ImportError:
-        use_tqdm = False
+    # Sequential downloads to avoid Playwright threading issues
+    completed = 0
+    failed = []
     
-    # Use ThreadPoolExecutor for downloads
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {}
-        for i, ep in enumerate(eps):
-            # Small delay between launches to avoid port conflicts when parallel
-            if i > 0 and max_workers > 1:
-                time.sleep(2)
-            future = executor.submit(download, arg=ep, download_file=download_file, res=str(resolution))
-            futures[future] = ep
-        
-        # Wait for all downloads to complete with progress bar
-        completed = 0
-        failed = []
-        
-        if use_tqdm:
-            progress = tqdm(total=len(eps), desc="Downloading", unit="ep")
-        
-        for future in as_completed(futures):
-            ep = futures[future]
-            try:
-                future.result()
-                completed += 1
-                Banners.success_message(f"Episode {ep} completed successfully ({completed}/{len(eps)})")
-            except Exception as e:
-                failed.append(ep)
-                logging.error(f"Episode {ep} failed: {e}")
-            
-            if use_tqdm:
-                progress.update(1)
-        
-        if use_tqdm:
-            progress.close()
+    for ep in eps:
+        try:
+            download(arg=ep, download_file=download_file, res=str(resolution))
+            completed += 1
+            Banners.success_message(f"Episode {ep} completed successfully ({completed}/{len(eps)})")
+        except Exception as e:
+            failed.append(ep)
+            logging.error(f"Episode {ep} failed: {e}")
     
     # Send notification if enabled
     if enable_notifications and download_file:
@@ -1279,6 +1254,7 @@ def main():
     
     # Argument parser setup to handle command-line inputs
     parser = argparse.ArgumentParser(description='AutoPahe - Anime downloader with advanced features')
+    parser.add_argument('-v', '--version', action='store_true', help='Display AutoPahe version and exit')
     parser.add_argument('-b', '--browser', default=default_browser, 
                       choices=['chrome', 'chromium', 'firefox'],
                       help=f'Select Playwright browser (default: {default_browser})')
@@ -1364,6 +1340,12 @@ def main():
 
     # Parse the command-line arguments
     args = parser.parse_args(remaining)
+
+    # Handle version argument
+    if args.version:
+        print("AutoPahe v3.1.1")
+        print("⚡ Anime Downloader with Advanced Features ⚡")
+        return
 
     # Set browser env after final parse
     try:

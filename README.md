@@ -1,0 +1,141 @@
+
+<!-- Badges -->
+[![PyPI version](https://badge.fury.io/py/autopahe.svg)](https://pypi.org/project/autopahe/)
+[![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/haxsysgit/autopahe/)
+[![License](https://img.shields.io/github/license/haxsysgit/autopahe?color=brightgreen)](https://github.com/haxsysgit/autopahe/blob/main/license.md)
+[![OpenIssues](https://img.shields.io/github/issues/haxsysgit/autopahe?color=important)](https://github.com/haxsysgit/autopahe/issues)
+<!--LineBreak-->
+[![Windows](https://img.shields.io/badge/Windows-white?style=flat-square&logo=windows&logoColor=blue)](https://github.com/haxsysgit/autopahe/)
+[![macOS](https://img.shields.io/badge/macOS-white?style=flat-square&logo=apple&logoColor=black)](https://github.com/haxsysgit/autopahe/)
+[![Linux](https://img.shields.io/badge/Linux-white?style=flat-square&logo=linux&logoColor=black)](https://github.com/haxsysgit/autopahe/)
+<!-- Badges -->
+
+# AutoPahe
+
+> **Download anime episodes easily from AnimePahe**
+
+A simple yet powerful tool to search and download your favorite anime episodes. Works on Windows, Mac, and Linux with a beautiful, colorful interface.
+
+## 🎯 What It Does
+
+- **Search Anime** - Find any anime by name with smart suggestions
+- **Download Episodes** - Get single episodes or entire seasons
+- **Fast Downloads** - Download multiple episodes at once
+- **Resume Downloads** - Pick up where you left off if interrupted
+- **Organize Collection** - Keep your downloaded anime neatly organized
+- **Desktop Notifications** - Get alerts when downloads finish
+
+## 🚀 Quick Start
+
+### Installation
+```bash
+pip install autopahe
+```
+
+### Basic Usage
+```bash
+# Search for anime
+autopahe -s "your anime name"
+
+# Download a single episode
+autopahe -s "anime name" -i 0 -d 1
+
+# Download entire season
+autopahe -s "anime name" -i 0 -md 1-12
+```
+## 📖 More Examples
+
+### Download Different Quality
+```bash
+# Download in 1080p (best quality)
+autopahe -s "anime name" -i 0 -d 1 -p 1080
+
+# Download in 360p (smaller file size)
+autopahe -s "anime name" -i 0 -d 1 -p 360
+```
+
+### Download Multiple Episodes
+```bash
+# Download episodes 1, 3, and 5
+autopahe -s "anime name" -i 0 -md "1,3,5"
+
+# Download episodes 1 through 12
+autopahe -s "anime name" -i 0 -md "1-12"
+
+# Download with faster parallel downloads
+autopahe -s "anime name" -i 0 -md "1-12" --workers 3
+```
+
+### Get Download Links Only
+```bash
+# Get the download link without downloading
+autopahe -s "anime name" -i 0 -l 1
+```
+
+## 💡 Tips
+
+- Use quotes around anime names with spaces: `"Attack on Titan"`
+- The first time you run it, it may take a moment to set up
+- Downloads go to your `Downloads/Anime` folder by default
+- Use `--verbose` to see detailed information while downloading
+- Use `--quiet` to see minimal output
+
+## 🛠️ What You Need
+
+- Python 3.8 or higher
+- Internet connection
+- About 500MB of free space for setup
+
+**That's it!** The tool handles everything else automatically.
+
+## 🎨 Beautiful Interface
+
+AutoPahe features a colorful, organized interface that looks like a webpage:
+- Clean section headers with progress indicators
+- Colored text for easy reading
+- Organized layout with proper spacing
+- No technical clutter - just what you need
+
+## 📱 Works Everywhere
+
+- **Windows** - Full support with desktop notifications
+- **Mac** - Native integration and notifications  
+- **Linux** - Complete functionality
+
+## 🆘 Need Help?
+
+If you run into any issues:
+1. Make sure you have Python 3.8 or higher
+2. Check your internet connection
+3. Try using quotes around anime names with spaces
+
+For more help, visit our GitHub page or report an issue.
+
+---
+
+## 📜 License
+
+This project is licensed under the MIT License - see the [LICENSE](license.md) file for details.
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## 📞 Support
+
+If you need help or have questions, visit our [GitHub Issues](https://github.com/haxsysgit/autopahe/issues) page.
+
+## 🔧 Advanced Usage
+
+For power users who want more control and features, see our [Advanced Usage Guide](ADVANCED.md) which covers:
+
+- **Detailed command reference** with all available options
+- **Configuration system** for customizing settings
+- **Batch operations** and parallel downloads
+- **Record management** for tracking your anime collection
+- **File organization** and sorting options
+- **Performance tuning** and troubleshooting
+
+---
+
+**Enjoy AutoPahe! 🎬**

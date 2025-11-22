@@ -60,9 +60,10 @@ DOWNLOADS = Path.home() / "Downloads"
 ########################################### LOGGING ################################################
 
 # Configure logging (level will be adjusted based on CLI args)
+# Default to ERROR level to suppress WARNING messages for clean user output
 logging.basicConfig(
-    level=logging.INFO,
-    format='\n%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.WARNING,
+    format='%(levelname)s: %(message)s',
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler('autopahe.log')
@@ -79,7 +80,9 @@ records = []
 search_response_dict = {}
 
 # Global anime selection
-animepicked = None
+animepicked = ""
+
+# Global episode page format
 episode_page_format = None
 
 # In-memory cache for episode data (faster than disk cache)
@@ -143,9 +146,8 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
         if arg != original_query.lower():
             print(f"🔍 Search corrected: '{original_query}' → '{arg}'")
 
-    # Display search banner
-    Banners.search(arg)
-    print()  # Use regular print instead of n() which might clear screen
+    # Display progress indicator and search banner
+    Banners.progress_indicator("searching")
 
     # API endpoint for search (prefer .si, fallback to .com)
     api_url = f'https://animepahe.si/api?m=search&q={arg}'
@@ -193,33 +195,8 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
                     print("   - Try searching with fewer keywords\n")
                     return None
                 
-                # Display cached results instantly
-                resultlen = len(results)
-                print()  # Add spacing instead of clearing screen
-                
-                # Show cache indicator for instant access
-                cache_indicator = f" {Fore.GREEN}⚡{Style.RESET_ALL}"
-                print(f"{Fore.GREEN}{resultlen}{Style.RESET_ALL} results were found  {cache_indicator}{Fore.CYAN}--->{Style.RESET_ALL}")
-                print()
-
-                for i, result in enumerate(results):
-                    name = result['title']
-                    episodenum = result['episodes']
-                    status = result['status']
-                    year = result['year']
-                    # Status color mapping
-                    status_color = {
-                        'Finished Airing': Fore.GREEN,
-                        'Currently Airing': Fore.YELLOW,
-                        'Not yet aired': Fore.RED
-                    }.get(str(status), Fore.WHITE)
-                    print(f'{Fore.MAGENTA}[{i}]{Style.RESET_ALL} : {Fore.CYAN}{name}{Style.RESET_ALL}')
-                    print('---------------------------------------------------------')
-                    print(f'        {Fore.BLUE}Number of episodes contained{Style.RESET_ALL} : {Fore.YELLOW}{episodenum}{Style.RESET_ALL}')
-                    print(f'        {Fore.BLUE}Current status of the anime{Style.RESET_ALL} : {status_color}{status}{Style.RESET_ALL}')
-                    print(f'        {Fore.BLUE}Year the anime aired{Style.RESET_ALL} : {Fore.YELLOW}{year}{Style.RESET_ALL}')
-                    print()
-                print()
+                # Display cached results using structured design
+                Banners.search_results(results, from_cache=True)
                 
                 print("⚡ INSTANT CACHE HIT - No browser/API used!")
                 return search_response_dict  # EARLY RETURN - INSTANT CACHE HIT
@@ -337,35 +314,10 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
         return None
     
     resultlen = len(search_response_dict['data'])
-    print()  # Add spacing instead of clearing screen
+    # Display results using structured design
+    from_cache = '_from_cache' in globals() and _from_cache
+    Banners.search_results(search_response_dict['data'], from_cache=from_cache)
     
-    # Check if data came from cache
-    cache_indicator = ""
-    if '_from_cache' in globals() and _from_cache:
-        cache_indicator = f" {Fore.GREEN}⚡{Style.RESET_ALL}"
-    
-    print(f"{Fore.GREEN}{resultlen}{Style.RESET_ALL} results were found  {cache_indicator}{Fore.CYAN}--->{Style.RESET_ALL}")
-    print()
-
-    for el in range(len(search_response_dict['data'])):
-        name = search_response_dict['data'][el]['title']
-        episodenum = search_response_dict['data'][el]['episodes']
-        status = search_response_dict['data'][el]['status']
-        year = search_response_dict['data'][el]['year']
-        # Status color mapping
-        status_color = {
-            'Finished Airing': Fore.GREEN,
-            'Currently Airing': Fore.YELLOW,
-            'Not yet aired': Fore.RED
-        }.get(str(status), Fore.WHITE)
-        print(f'{Fore.MAGENTA}[{el}]{Style.RESET_ALL} : {Fore.CYAN}{name}{Style.RESET_ALL}')
-        print('---------------------------------------------------------')
-        print(f'        {Fore.BLUE}Number of episodes contained{Style.RESET_ALL} : {Fore.YELLOW}{episodenum}{Style.RESET_ALL}')
-        print(f'        {Fore.BLUE}Current status of the anime{Style.RESET_ALL} : {status_color}{status}{Style.RESET_ALL}')
-        print(f'        {Fore.BLUE}Year the anime aired{Style.RESET_ALL} : {Fore.YELLOW}{year}{Style.RESET_ALL}')
-        print()
-
-    print()  # Add spacing instead of clearing screen
     return search_response_dict
 
 
@@ -442,6 +394,7 @@ def index(arg):
                 'type': anime_data.get('type', 'N/A'),
                 'status': anime_data.get('status', 'N/A'),
                 'image': f"https://animepahe.si{anime_data.get('poster', '')}" if anime_data.get('poster') and not anime_data.get('poster', '').startswith('http') else anime_data.get('poster', 'No image available'),
+                'homepage': episode_page_format,
                 'episode_count': 'N/A',
                 'first_episode': 'N/A',
                 'last_episode': 'N/A'
@@ -455,30 +408,17 @@ def index(arg):
                 'type': anime_data.get('type', 'N/A'),
                 'status': anime_data.get('status', 'N/A'),
                 'image': f"https://animepahe.si{anime_data.get('poster', '')}" if anime_data.get('poster') and not anime_data.get('poster', '').startswith('http') else anime_data.get('poster', 'No image available'),
+                'homepage': episode_page_format,
                 'episode_count': len(jsonpage_dict.get('data', [])),
                 'first_episode': jsonpage_dict['data'][0]['episode'] if jsonpage_dict.get('data') else 'N/A',
                 'last_episode': jsonpage_dict['data'][-1]['episode'] if jsonpage_dict.get('data') else 'N/A'
             }
         
-        # Display anime info without clearing the screen to preserve search results
-        Banners.select(
-            anime=anime_info['title'],
-            eps=anime_info['episodes'],
-            anipage=episode_page_format,
-            year=anime_info['year'],
-            atype=anime_info['type'],
-            status=anime_info['status'],
-            img=anime_info['image']
-        )
-
+        # Display anime info using structured design
+        Banners.anime_selection(anime_info)
         
-        # Print available commands with better styling
-        print(f"\n  {Fore.BLUE}🔧 Available Commands:{Style.RESET_ALL}")
-        print(f"    {Fore.CYAN}➤ Download:{Style.RESET_ALL} {Fore.YELLOW}-d{Style.RESET_ALL} <episode_number>  (e.g., {Fore.YELLOW}-d 1{Style.RESET_ALL})")
-        print(f"    {Fore.CYAN}➤ Multi-download:{Style.RESET_ALL} {Fore.YELLOW}-md{Style.RESET_ALL} <range>  (e.g., {Fore.YELLOW}-md 1-12{Style.RESET_ALL})")
-        print(f"    {Fore.CYAN}➤ Get links:{Style.RESET_ALL} {Fore.YELLOW}-l{Style.RESET_ALL} <episode>  (e.g., {Fore.YELLOW}-l 1{Style.RESET_ALL})")
-        print(f"    {Fore.CYAN}➤ Back to search:{Style.RESET_ALL} {Fore.YELLOW}-s{Style.RESET_ALL} <new_search>")
-        print()
+        # Display available commands using structured design
+        Banners.commands_table()
         
         # Combine response data for further processing
         if jsonpage_dict:
@@ -639,8 +579,8 @@ def download(arg=1, download_file=True, res = "720"):
     # print(f"\nEpisode {arg} Download link => {kwik}\n")
 
     if download_file:
-        # Call the Banners.downloading method to display a download banner
-        Banners.downloading(animepicked, arg)
+        # Show download progress using structured design
+        Banners.download_progress(animepicked, arg)
 
         # Add download to resume manager for tracking
         download_id = resume_manager.add_download(
@@ -663,7 +603,7 @@ def download(arg=1, download_file=True, res = "720"):
             entry = collection_manager.add_anime(animepicked)
             episode_file = str(DOWNLOADS / f"{animepicked}_Episode_{arg}.mp4")
             collection_manager.add_episode_file(animepicked, arg, episode_file, organize=False)
-            logging.info(f"Added episode {arg} to collection for '{animepicked}'")
+            Banners.success_message(f"Added episode {arg} to collection for '{animepicked}'")
         else:
             # Mark download as failed in resume manager
             resume_manager.mark_failed(download_id, "Download failed")
@@ -691,9 +631,9 @@ def multi_download(arg: str, download_file=True, resolution="720", max_workers=1
             eps.append(int(part))
 
     if max_workers == 1:
-        logging.info(f"Starting sequential download of {len(eps)} episodes")
+        Banners.info_message(f"📥 Starting sequential download of {len(eps)} episodes")
     else:
-        logging.info(f"Starting parallel download of {len(eps)} episodes with {max_workers} workers")
+        Banners.info_message(f"📥 Starting parallel download of {len(eps)} episodes with {max_workers} workers")
     
     # Progress tracking
     try:
@@ -724,7 +664,7 @@ def multi_download(arg: str, download_file=True, resolution="720", max_workers=1
             try:
                 future.result()
                 completed += 1
-                logging.info(f"Episode {ep} completed successfully ({completed}/{len(eps)})")
+                Banners.success_message(f"Episode {ep} completed successfully ({completed}/{len(eps)})")
             except Exception as e:
                 failed.append(ep)
                 logging.error(f"Episode {ep} failed: {e}")
@@ -1108,7 +1048,7 @@ def command_main(args):
         start_ep = (season_num - 1) * 12 + 1
         end_ep = season_num * 12
         mdarg = f"{start_ep}-{end_ep}"
-        logging.info(f"Batch season {season_num}: downloading episodes {start_ep}-{end_ep}")
+        print(f"📺 Season {season_num}: downloading episodes {start_ep}-{end_ep}")
     
     # Multi Download function
     if mdarg:
@@ -1139,7 +1079,7 @@ def command_main(args):
             if str(position) in database:
                 print(dumps(database[str(position)], indent=4))
             else:
-                logging.info(f"No record found at position {position}")
+                print(f"❌ No record found at position {position}")
         else:
             results = search_record(rarg)
             if results:
@@ -1403,11 +1343,13 @@ def main():
         return
     
     # Configure logging level based on --verbose/--quiet
+    # Default to ERROR level to suppress WARNING messages for clean user output
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
         logging.debug("Verbose logging enabled")
-    elif args.quiet:
-        logging.getLogger().setLevel(logging.WARNING)
+    else:
+        # Default: ERROR level (only errors) - completely clean user output
+        logging.getLogger().setLevel(logging.ERROR)
 
     # AUTOPAHE_BROWSER already set above from args/defaults
 

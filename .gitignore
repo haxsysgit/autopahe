@@ -13,3 +13,4 @@ scripts/
 COMMIT_MESSAGE.txt
 Docs/
 about.txt
+.env

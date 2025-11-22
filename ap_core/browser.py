@@ -53,12 +53,20 @@ def get_pw_context(browser_choice: str = None, headless: bool = True):
             return None
         _pw = sync_playwright().start()
         choice = (browser_choice or os.environ.get("AUTOPAHE_BROWSER") or "chrome").lower()
+        # Normalize edge alias
+        if choice == "edge":
+            choice = "msedge"
         user_data_dir = str(Path.home() / ".cache" / "autopahe-pw" / choice)
         if choice == "firefox":
             _pw_context = _pw.firefox.launch_persistent_context(user_data_dir, headless=headless)
         elif choice == "chrome":
             try:
                 _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, channel="chrome", headless=headless)
+            except Exception:
+                _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, headless=headless)
+        elif choice == "msedge":
+            try:
+                _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, channel="msedge", headless=headless)
             except Exception:
                 _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, headless=headless)
         else:

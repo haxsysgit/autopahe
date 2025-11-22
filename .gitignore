@@ -11,3 +11,5 @@ build/
 *.tar.gz
 scripts/
 COMMIT_MESSAGE.txt
+Docs/
+about.txt

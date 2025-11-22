@@ -4,11 +4,15 @@
 # Standard library imports
 import os
 import sys
+import os
+import re
+import json
 import time
-import argparse
-import logging
+import signal
 import subprocess
+import logging
 import atexit
+import argparse
 from pathlib import Path
 from json import loads,dumps
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -26,7 +30,7 @@ from bs4 import BeautifulSoup
 from ap_core.banners import Banners
 from ap_core.browser import driver_output, cleanup_browsers, get_request_session, get_pw_context, batch_driver_output
 from ap_core.config import load_app_config, write_sample_config
-from ap_core.cache import cache_get, cache_set, cache_clear, get_cache_stats
+from ap_core.cache import cache_get, cache_set, cache_clear, get_cache_stats, display_cache_stats, export_cache, import_cache, cache_warm
 from ap_core.notifications import notify_download_complete, notify_download_failed
 from ap_core.cookies import clear_cookies
 
@@ -57,15 +61,27 @@ DOWNLOADS = Path.home() / "Downloads"
 
 ########################################### LOGGING ################################################
 
-# Configure logging (level will be adjusted based on CLI args)
+# Configure logging - level will be adjusted based on CLI args
+# Default to INFO level, but will be changed to DEBUG/WARNING based on flags
 logging.basicConfig(
     level=logging.INFO,
-    format='\n%(asctime)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler('autopahe.log')
     ]
 )
+
+# Create logger for cleaner output
+logger = logging.getLogger(__name__)
+
+# Helper function to check if verbose mode is enabled
+def is_verbose():
+    """Check if verbose logging is enabled."""
+    try:
+        return 'args' in globals() and getattr(args, 'verbose', False)
+    except:
+        return False
 
 
 #######################################################################################################################
@@ -101,7 +117,7 @@ def setup_environment():
     try:
         default_path = Path.home() / '.config' / 'autopahe' / 'config.ini'
         write_sample_config(str(default_path))
-        print(f"✓ Sample config written to: {default_path}")
+        print(f"\u2713 Sample config written to: {default_path}")
     except Exception as e:
         print(f"Config setup skipped: {e}")
     try:
@@ -109,15 +125,20 @@ def setup_environment():
     except Exception:
         pass
     try:
-        # Prefer Chrome CfT to match default; fallback to Chromium
-        rc = subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chrome'], check=False)
-        if getattr(rc, 'returncode', 1) != 0:
-            subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chromium'], check=False)
+        # Install common browsers to support most users out of the box
+        for b in ['chrome', 'chromium', 'firefox', 'msedge']:
+            try:
+                print(f"Installing Playwright browser: {b} ...")
+                subprocess.run([sys.executable, '-m', 'playwright', 'install', b], check=False)
+            except Exception:
+                pass
     except Exception:
         print("Playwright not available; skipping browser install.")
     print("Setup complete.")
     return True
 
+
+################################################### SEARCH FUNCTION ############################################
 
 def lookup(arg, year_filter=None, status_filter=None):
     """Search for anime using AnimePahe API with filters.
@@ -147,10 +168,12 @@ def lookup(arg, year_filter=None, status_filter=None):
         if cached:
             search_response = cached
             _from_cache = True
-            logging.debug("✓ Loaded from disk cache")
+            if is_verbose():
+                logger.debug("✓ Loaded from disk cache")
         else:
             # Step 2: Try direct HTTP request (fast, no browser needed)
-            logging.debug("Fetching from API...")
+            if is_verbose():
+                logger.debug("Fetching from API...")
             session = get_request_session()
             headers = {
                 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
@@ -165,32 +188,43 @@ def lookup(arg, year_filter=None, status_filter=None):
                         # Normalize api_url to the working domain for downstream/fallbacks
                         api_url = response.url
                         cache_set(api_url, search_response)
-                        logging.debug(f"✓ Fetched from API and cached ({base})")
+                        if is_verbose():
+                            logger.debug(f"✓ Fetched from API and cached ({base})")
                         break
                     else:
-                        logging.warning(f"API {base} returned status {response.status_code}")
+                        if is_verbose():
+                            logger.warning(f"API {base} returned status {response.status_code}")
                 except Exception as _e:
-                    logging.debug(f"Fetch attempt on {base} failed: {_e}")
+                    if is_verbose():
+                        logger.debug(f"Fetch attempt on {base} failed: {_e}")
 
         # Parse response if we got one
         if search_response:
             search_response_dict = loads(search_response)
-            logging.debug(f"Found {len(search_response_dict.get('data', []))} results")
+            if is_verbose():
+                logger.debug(f"Found {len(search_response_dict.get('data', []))} results")
         else:
             # Step 3: Only use Playwright as last resort (slow, resource intensive)
-            logging.warning("Direct API failed, falling back to Playwright...")
+            if not is_verbose():
+                print("⚠ Direct API access failed, using browser fallback...")
+            else:
+                logger.warning("Direct API failed, falling back to Playwright...")
             search_response = driver_output(api_url, driver=True, json=True, wait_time=5)
             if search_response:
                 search_response_dict = search_response
-                logging.debug(f"Playwright fallback succeeded")
+                if is_verbose():
+                    logger.debug("Playwright fallback succeeded")
                 # Don't close browser yet - might need it for index/about operations
             else:
-                logging.error("All methods failed to retrieve search results")
+                logger.error("All methods failed to retrieve search results")
                 search_response_dict = {'data': []}
 
     except requests.exceptions.RequestException as e:
         # Network error - try Playwright fallback
-        logging.warning(f"Network error ({e}), trying Playwright...")
+        if not is_verbose():
+            print("⚠ Network error, using browser fallback...")
+        else:
+            logger.warning(f"Network error ({e}), trying Playwright...")
         try:
             search_response = driver_output(api_url, driver=True, json=True, wait_time=5)
             if search_response:
@@ -200,7 +234,10 @@ def lookup(arg, year_filter=None, status_filter=None):
         except Exception:
             search_response_dict = {'data': []}
     except Exception as e:
-        logging.warning(f"Parsing/API error ({e}); trying Playwright fallback...")
+        if not is_verbose():
+            print("⚠ API error, using browser fallback...")
+        else:
+            logger.warning(f"Parsing/API error ({e}); trying Playwright fallback...")
         try:
             search_response = driver_output(api_url, driver=True, json=True, wait_time=5)
             if search_response:
@@ -212,12 +249,13 @@ def lookup(arg, year_filter=None, status_filter=None):
 
     # Check if results exist
     if not search_response_dict or 'data' not in search_response_dict or not search_response_dict['data']:
-        logging.error("No results found. Please try a different search term.")
+        logger.error("No results found. Please try a different search term.")
         print("\n❌ No anime found matching your search.\n")
         return None
     
     # Debug: Show we have results
-    logging.info(f"Processing {len(search_response_dict['data'])} search results")
+    if is_verbose():
+        logger.info(f"Processing {len(search_response_dict['data'])} search results")
     
     # Apply filters if provided
     results = search_response_dict['data']
@@ -225,14 +263,16 @@ def lookup(arg, year_filter=None, status_filter=None):
         try:
             year = int(year_filter)
             results = [r for r in results if r.get('year') == year]
-            logging.debug(f"Filtered by year={year}, {len(results)} results remain")
+            if is_verbose():
+                logger.debug(f"Filtered by year={year}, {len(results)} results remain")
         except ValueError:
             pass
     
     if status_filter:
         status_lower = status_filter.lower()
         results = [r for r in results if status_lower in str(r.get('status', '')).lower()]
-        logging.debug(f"Filtered by status={status_filter}, {len(results)} results remain")
+        if is_verbose():
+            logger.debug(f"Filtered by status={status_filter}, {len(results)} results remain")
     
     # Update dict with filtered results
     search_response_dict['data'] = results
@@ -282,6 +322,8 @@ def lookup(arg, year_filter=None, status_filter=None):
 
 # =========================================== handling the single download utility ============================
     
+
+################################################### ANIME INFO FUNCTION ###########################################
 
 def index(arg):
     """Display information about the selected anime and prepare for downloads.
@@ -418,6 +460,8 @@ def about():
 
 
 
+################################################### DOWNLOAD FUNCTION ############################################
+
 def download(arg=1, download_file=True, res = "720"):
     """
     Download the specified episode by navigating with Playwright and extracting the download link.
@@ -440,55 +484,152 @@ def download(arg=1, download_file=True, res = "720"):
             logging.error("Playwright context not available")
             return
         page = context.new_page()
-        page.goto(stream_page_url, wait_until='domcontentloaded', timeout=60000)
-        # Wait for dropdown links to be present
+        page.goto(stream_page_url, wait_until='networkidle', timeout=60000)
+        # Try to switch to the Download tab if present
         try:
-            page.wait_for_selector('a.dropdown-item[target="_blank"]', timeout=30000)
+            try:
+                page.click('a[href="#pickDownload"]', timeout=3000)
+            except Exception:
+                page.click('text=Download', timeout=3000)
+            page.wait_for_selector('#pickDownload', timeout=5000)
         except Exception:
             pass
-        # Extract hrefs via JS for reliability
-        dload_hrefs = page.eval_on_selector_all('a.dropdown-item[target="_blank"]', 'els => els.map(e => e.href)') or []
+        # Wait for dropdown links to be present (no target attribute constraint)
+        try:
+            page.wait_for_selector('#pickDownload a.dropdown-item, a.dropdown-item', timeout=30000)
+        except Exception:
+            pass
+        # Extract hrefs + text via JS for reliability
+        dload_items = page.eval_on_selector_all('#pickDownload a.dropdown-item, a.dropdown-item', 'els => els.map(e => ({href: e.href, text: (e.textContent||"").trim()}))') or []
+        if not dload_items:
+            # Attempt to open dropdowns/toggles, then retry
+            for sel in ['button.dropdown-toggle', '[data-bs-toggle="dropdown"]', '[data-toggle="dropdown"]', '#pickDownload [data-bs-toggle="dropdown"]']:
+                try:
+                    page.click(sel, timeout=2000)
+                except Exception:
+                    continue
+            try:
+                page.wait_for_selector('#pickDownload a.dropdown-item, a.dropdown-item', timeout=5000)
+            except Exception:
+                pass
+            dload_items = page.eval_on_selector_all('#pickDownload a.dropdown-item, a.dropdown-item', 'els => els.map(e => ({href: e.href, text: (e.textContent||"").trim()}))') or []
+        # Fallback: capture any kwik anchors visible on page
+        kwik_items = page.eval_on_selector_all('a[href*="kwik" i]', 'els => els.map(e => ({href: e.href, text: (e.textContent||"").trim()}))') or []
+        # Also inspect buttons which might carry URLs in attributes/handlers
+        btn_items = page.eval_on_selector_all('button.dropdown-item, button', 'els => els.map(e => ({text: (e.textContent||"").trim(), onclick: e.getAttribute("onclick")||"", datahref: e.getAttribute("data-href")||""}))') or []
+        # Parse possible URLs from button attributes
+        extra_from_btns = []
+        for it in btn_items:
+            href = it.get('datahref') or ''
+            if not href and it.get('onclick'):
+                try:
+                    m = re.search(r'https?://[^\'\"]*kwik[^\'\"]*', it['onclick'])
+                    if m:
+                        href = m.group(0)
+                except Exception:
+                    href = ''
+            if href:
+                extra_from_btns.append({'href': href, 'text': it.get('text') or ''})
+        all_items = dload_items + [it for it in kwik_items if it not in dload_items] + extra_from_btns
         # Filters download links with resolution >= 720p and excludes 'eng' versions,
         # then sorts them starting from 720p up to the highest resolution available.
-        linkpahe = sorted(
-            [
-                href for href in dload_hrefs
-                if (
-                    (m := re.search(r'(\d{3,4})p', str(href))) and 
-                    int(m.group(1)) >= 720 and 
-                    'eng' not in str(href).lower()
-                )
-            ],
-            key=lambda url: int(re.search(r'(\d{3,4})p', url).group(1)) if re.search(r'(\d{3,4})p', url) else float('inf')
-        )
+        # Prefer items whose href or text indicates resolution >=720 and not 'eng'
+        def _res_val(s: str) -> int:
+            m = re.search(r'(\d{3,4})p', s or '')
+            return int(m.group(1)) if m else -1
+        filtered = [it['href'] for it in all_items if (_res_val(it['href']) >= 720 or _res_val(it['text']) >= 720)]
+        if not filtered and all_items:
+            filtered = [it['href'] for it in all_items]
+        linkpahe = sorted(filtered, key=lambda url: _res_val(url), reverse=False if filtered else False)
+        kwik = None
+
+        # Debug counts
+        if is_verbose():
+            logging.debug(f"Download discovery: dropdown_items={len(dload_items)} kwik_items={len(kwik_items)} btn_items={len(btn_items)} all_items={len(all_items)}")
+        
+        # Debug: Show discovered links (only in verbose mode)
+        if is_verbose():
+            print(f"Debug: Found {len(all_items)} total download links:")
+            for i, item in enumerate(all_items[:5]):  # Show first 5 links
+                print(f"  [{i}] {item.get('href', 'No URL')} (text: {item.get('text', 'No text')[:50]})")
+            if len(all_items) > 5:
+                print(f"  ... and {len(all_items) - 5} more links")
 
         # If a valid download link is found, proceed with the next steps
         if not linkpahe:
+            # Fallback: click a dropdown item and capture popup URL (kwik /f/ page)
+            try:
+                loc = page.locator('#pickDownload a.dropdown-item, a.dropdown-item')
+                count = loc.count()
+                pick = 0
+                # Prefer 720 if visible in text
+                for i in range(count):
+                    try:
+                        t = loc.nth(i).inner_text(timeout=1000)
+                    except Exception:
+                        t = ''
+                    if re.search(r'720p', t, re.IGNORECASE):
+                        pick = i
+                        break
+                with page.expect_popup() as pop_info:
+                    loc.nth(pick).click()
+                pop = pop_info.value
+                pop.wait_for_load_state('domcontentloaded', timeout=30000)
+                try:
+                    pop.wait_for_selector('a.redirect', timeout=10000)
+                    kwik = pop.eval_on_selector('a.redirect', 'el => el.href')
+                except Exception:
+                    kwik = pop.url
+                try:
+                    pop.close()
+                except Exception:
+                    pass
+            except Exception:
+                kwik = None
+            if not kwik:
+                try:
+                    title = page.title()
+                except Exception:
+                    title = ''
+                try:
+                    total_anchors = page.eval_on_selector_all('a', 'els => els.length') or 0
+                except Exception:
+                    total_anchors = 0
+                logging.error(f"No valid download link found for episode {arg}. Discovered dropdown={len(dload_items)}, kwik={len(kwik_items)}, btns={len(btn_items)}, anchors={total_anchors}. Page title: {title}")
+                # Save debug HTML for inspection
+                debug_path = Path.cwd() / f"autopahe_download_debug_{session_id}_{episode_session}.html"
+                with open(debug_path, 'w', encoding='utf-8') as f:
+                    f.write(page.content())
+                print(f"Saved debug HTML to: {debug_path}")
+                page.close()
+                return
+                pass
             page.close()
-            raise ValueError(f"No valid download link found for episode {arg}")
+            return
 
         # Navigate to the selected download link
         res = str(res)
-        if res == '720':
-            page.goto(linkpahe[0], wait_until='domcontentloaded', timeout=60000)
-        elif res == '1080':
-            page.goto(linkpahe[-1], wait_until='domcontentloaded', timeout=60000)
-        else:
-            target = linkpahe[1] if len(linkpahe) > 1 else linkpahe[0]
-            page.goto(target, wait_until='domcontentloaded', timeout=60000)
+        if not kwik:
+            if res == '720':
+                page.goto(linkpahe[0], wait_until='networkidle', timeout=60000)
+            elif res == '1080':
+                page.goto(linkpahe[-1], wait_until='networkidle', timeout=60000)
+            else:
+                target = linkpahe[1] if len(linkpahe) > 1 else linkpahe[0]
+                page.goto(target, wait_until='networkidle', timeout=60000)
 
-        # Wait for the kwik redirect anchor and extract href
-        try:
-            page.wait_for_selector('a.redirect', timeout=30000)
-            kwik = page.eval_on_selector('a.redirect', 'el => el.href')
-        except Exception:
-            # Fallback to HTML parse
-            page.wait_for_timeout(5000)
-            kwik_page = page.content()
-            kwik_cx = BeautifulSoup(kwik_page, 'lxml')
-            a = kwik_cx.find('a', class_='redirect')
-            kwik = a['href'] if a else None
-        page.close()
+            # Wait for the kwik redirect anchor and extract href
+            try:
+                page.wait_for_selector('a.redirect', timeout=30000)
+                kwik = page.eval_on_selector('a.redirect', 'el => el.href')
+            except Exception:
+                # Fallback to HTML parse
+                page.wait_for_timeout(5000)
+                kwik_page = page.content()
+                kwik_cx = BeautifulSoup(kwik_page, 'lxml')
+                a = kwik_cx.find('a', class_='redirect')
+                kwik = a['href'] if a else None
+            page.close()
 
     except Exception as e:
         # Log general errors
@@ -507,8 +648,12 @@ def download(arg=1, download_file=True, res = "720"):
         # Call the Banners.downloading method to display a download banner
         Banners.downloading(animepicked, arg)
 
+        # Debug: Show the kwik URL being used (only in verbose mode)
+        if is_verbose():
+            print(f"Debug: Attempting download from kwik URL: {kwik}")
+
         # Trigger the download process using the kwik link and specify the download directory
-        kwik_download(url=kwik, dpath=DOWNLOADS, ep=arg, animename=animepicked)
+        kwik_download(url=kwik, browser=browser_choice, dpath=DOWNLOADS, ep=arg, animename=animepicked)
     else:
         return kwik
 
@@ -517,6 +662,8 @@ def download(arg=1, download_file=True, res = "720"):
     # ========================================== Multi Download Utility ==========================================
 
     
+################################################### MULTI-DOWNLOAD FUNCTION ########################################
+
 def multi_download(arg: str, download_file=True, resolution="720", max_workers=1, enable_notifications=False):
     """
     Downloads multiple episodes using ThreadPoolExecutor.
@@ -591,6 +738,8 @@ def multi_download(arg: str, download_file=True, resolution="720", max_workers=1
 
 #
 # Function to handle user interaction and guide them through the anime selection and download process
+################################################### INTERACTIVE MODE ###############################################
+
 def interactive_main():
     """Interactive mode for users who prefer guided input.
     
@@ -646,6 +795,8 @@ def interactive_main():
         print("Invalid option selected.")
 
 
+################################################### COMMAND MAIN HANDLER ###########################################
+
 def command_main(args):
     global barg
     barg = args.browser  # Selected browser
@@ -691,17 +842,86 @@ def command_main(args):
     # Handle cache commands
     if cache_cmd:
         if cache_cmd == 'clear':
+            print(" Clearing old cache entries...")
             cache_clear()
-            clear_cookies()
-            print("✓ Cache and cookies cleared")
-            return
+            print(" Cache cleared successfully")
+            
         elif cache_cmd == 'stats':
-            stats = get_cache_stats()
-            print(f"\nCache Statistics:")
-            print(f"  Files: {stats['count']}")
-            print(f"  Size: {stats['size_mb']} MB")
-            print(f"  Path: {stats['path']}\n")
-            return
+            display_cache_stats()
+            
+        elif cache_cmd == 'export':
+            export_file = getattr(args, 'cache_file', None)
+            if not export_file:
+                export_file = f"autopahe_cache_export_{int(time.time())}.json"
+            
+            print(f" Exporting cache to {export_file}...")
+            export_cache(export_file, include_content=False)
+            
+        elif cache_cmd == 'import':
+            import_file = getattr(args, 'cache_file', None)
+            if not import_file:
+                print(" Please specify import file: --cache import --cache-file <file>")
+                return
+            
+            if not os.path.exists(import_file):
+                print(f" Import file not found: {import_file}")
+                return
+                
+            print(f" Importing cache from {import_file}...")
+            import_cache(import_file, overwrite=False)
+            
+        elif cache_cmd == 'warm':
+            print("🔥 Warming up cache with popular anime...")
+            # Popular anime search terms (will be encoded by lookup function)
+            popular_searches = [
+                "death note",
+                "one piece", 
+                "naruto",
+                "attack on titan",
+                "demon slayer"
+            ]
+            
+            warmed = 0
+            for search_term in popular_searches:
+                try:
+                    # Use the same lookup function to ensure consistent URL format
+                    api_url = f'https://animepahe.si/api?m=search&q={search_term}'
+                    
+                    # Check if already cached
+                    from ap_core.cache import cache_get, cache_set
+                    if not cache_get(api_url, max_age_hours=1):
+                        # Use the same logic as lookup function to cache
+                        from ap_core.browser import get_request_session, driver_output
+                        session = get_request_session()
+                        headers = {
+                            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
+                            'Accept': 'application/json'
+                        }
+                        
+                        # Try direct HTTP first
+                        response = session.get(api_url, headers=headers, timeout=15)
+                        if response.status_code == 200 and response.content:
+                            cache_set(api_url, response.content, tags=['popular', 'favorites'])
+                            print(f"✓ Cached: {search_term}")
+                            warmed += 1
+                        else:
+                            # Fallback to Playwright
+                            print(f"⚠ HTTP failed for {search_term}, trying browser fallback...")
+                            content = driver_output(api_url, driver=True, content=True, wait_time=5)
+                            if content:
+                                cache_set(api_url, content.encode(), tags=['popular', 'favorites'])
+                                print(f"✓ Cached via browser: {search_term}")
+                                warmed += 1
+                            else:
+                                print(f"✗ Failed to cache {search_term}")
+                    else:
+                        print(f"⚡ Already cached: {search_term}")
+                except Exception as e:
+                    print(f"✗ Failed to cache {search_term}: {e}")
+            
+            print(f"\n🔥 Cache warming complete: {warmed} searches cached")
+            
+        return  # Exit after cache command
     
     # Search function with filters
     if sarg:
@@ -978,7 +1198,7 @@ def main():
     # Argument parser setup to handle command-line inputs
     parser = argparse.ArgumentParser(description='AutoPahe - Anime downloader with advanced features')
     parser.add_argument('-b', '--browser', default=default_browser, 
-                      choices=['chrome', 'chromium', 'firefox'],
+                      choices=['chrome', 'chromium', 'firefox', 'edge'],
                       help=f'Select Playwright browser (default: {default_browser})')
     parser.add_argument('-s', '--search', type=str, help='Search for an anime by name')
     parser.add_argument('-i', '--index', type=int, help='Specify the index of the desired anime from the search results')
@@ -1012,7 +1232,8 @@ def main():
     parser.add_argument('--status', type=str, help='Filter search results by status (e.g., "Finished Airing")')
     parser.add_argument('--season', type=int, help='Download entire season (12-13 eps). Example: --season 1 downloads eps 1-12')
     parser.add_argument('--notify', action='store_true', help='Enable desktop notifications on download complete/fail')
-    parser.add_argument('--cache', choices=['clear', 'stats'], help='Cache management: clear (remove all) or stats (show info)')
+    parser.add_argument('--cache', choices=['clear', 'stats', 'export', 'import', 'warm'], nargs='?', const='stats', help='Cache management: clear (remove old), stats (show info), export <file>, import <file>, warm (cache favorites)')
+    parser.add_argument('--cache-file', help='File path for cache export/import operations')
     parser.add_argument('--setup', action='store_true', help='Initial setup: write config and install browser')
     
     # Verbosity flags
@@ -1051,9 +1272,15 @@ def main():
     # Configure logging level based on --verbose/--quiet
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
-        logging.debug("Verbose logging enabled")
+        logger.debug("Verbose logging enabled")
     elif args.quiet:
         logging.getLogger().setLevel(logging.WARNING)
+        # Suppress INFO messages for cleaner output
+        logging.getLogger('requests').setLevel(logging.WARNING)
+        logging.getLogger('urllib3').setLevel(logging.WARNING)
+    else:
+        # Default mode - suppress urllib3 retry warnings
+        logging.getLogger('urllib3').setLevel(logging.ERROR)
 
     # AUTOPAHE_BROWSER already set above from args/defaults
 

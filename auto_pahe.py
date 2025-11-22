@@ -29,6 +29,19 @@ from rich.live import Live
 import threading
 import time
 
+# Get version dynamically from package metadata
+try:
+    from importlib.metadata import version
+    AUTOPAHE_VERSION = version("autopahe")
+except ImportError:
+    # Fallback for older Python versions
+    try:
+        import pkg_resources
+        AUTOPAHE_VERSION = pkg_resources.get_distribution("autopahe").version
+    except:
+        # Development fallback
+        AUTOPAHE_VERSION = "dev"
+
 # Initialize rich console
 console = Console()
 
@@ -1343,7 +1356,7 @@ def main():
 
     # Handle version argument
     if args.version:
-        print("AutoPahe v3.1.1")
+        print(f"AutoPahe v{AUTOPAHE_VERSION}")
         print("⚡ Anime Downloader with Advanced Features ⚡")
         return
 

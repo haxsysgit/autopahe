@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .[test]
+    
+    - name: Run tests
+      run: |
+        python -m pytest tests/ -v
+
+  build-and-publish:
+    needs: test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Full history for changelog generation
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+    
+    - name: Generate changelog
+      run: |
+        # Extract version from tag
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "Generating changelog for v$VERSION"
+        
+        # Create simple changelog entry from commits since last tag
+        LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+        
+        if [ -n "$LAST_TAG" ]; then
+          echo "## [$VERSION] - $(date +%Y-%m-%d)" > CHANGELOG_NEW.md
+          echo "" >> CHANGELOG_NEW.md
+          
+          # Get commits since last tag
+          git log --pretty=format:"- %s" $LAST_TAG..HEAD >> CHANGELOG_NEW.md
+          
+          # Update CHANGELOG.md
+          if [ -f CHANGELOG.md ]; then
+            # Insert new entry after the first line
+            sed -i "2r CHANGELOG_NEW.md" CHANGELOG.md
+          else
+            mv CHANGELOG_NEW.md CHANGELOG.md
+          fi
+          
+          rm CHANGELOG_NEW.md
+        fi
+    
+    - name: Load environment variables (for testing)
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+      run: |
+        if [ -f .env ]; then
+          export $(cat .env | grep -v '^#' | xargs)
+          echo "PYPI_AUTOPAHE=$PYPI_AUTOPAHE" >> $GITHUB_ENV
+        fi
+    
+    - name: Build package
+      run: python -m build
+    
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@v1.8.14
+      with:
+        password: ${{ secrets.PYPI_AUTOPAHE }}
+        # For testing: you can also use environment variable
+        # password: ${{ env.PYPI_AUTOPAHE }}
+    
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        body_path: CHANGELOG.md
+        draft: false
+        prerelease: false

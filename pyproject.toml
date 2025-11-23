@@ -52,3 +52,8 @@ py-modules = ["auto_pahe", "kwikdown"]
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "twine>=6.1.0",
+]

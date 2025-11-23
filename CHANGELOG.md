@@ -1,5 +1,39 @@
 # AutoPahe Changelog
 
+## [v3.2.0] - 2024-11-23
+
+### 🎬 ADDED
+- **Cross-Platform Streaming**: Stream anime directly to media players
+- **Auto Player Detection**: Automatically detects VLC, MPV, Windows Media Player, MPC-HC, MPC-BE, Iina, SMPlayer, Celluloid
+- **Smart Fallback**: Provides installation guidance when no media player is found
+- **Streaming Commands**: New `-st/--stream` argument for instant streaming
+- **Player Support Matrix**: Comprehensive support for Windows, macOS, and Linux players
+- **Installation Guides**: OS-specific setup instructions for missing players
+
+### ⚡ IMPROVED
+- **Performance**: 5-10x faster HTML parsing by removing BeautifulSoup dependency
+- **Startup Speed**: Faster application launch with optimized imports
+- **Memory Usage**: Reduced memory footprint with unified cache management
+- **Cache Efficiency**: Instant anime information loading from disk cache
+- **Code Organization**: Streamlined error handling and reduced duplication
+
+### 🛠️ CHANGED
+- **Dependencies**: Removed BeautifulSoup4 and lxml for smaller footprint
+- **Folder Creation**: Fixed duplicate Anime folder creation issue
+- **Collection Manager**: Disabled redundant organization - `--sort` handles all file organization
+- **File Organization**: Cleaner separation between downloading and sorting workflows
+
+### 🔧 REMOVED
+- **Unused Modules**: Removed `cookies.py` and `execution_tracker.py` for optimization
+- **Redundant Code**: Eliminated duplicate filter functions and error handling blocks
+- **Heavy Dependencies**: Streamlined dependency list for faster installation
+
+### 📚 DOCUMENTATION
+- **Streaming Section**: Comprehensive documentation with examples for all platforms
+- **Player Support**: Detailed matrix of supported media players by OS
+- **Installation Guides**: Step-by-step setup instructions for missing players
+- **Performance Notes**: Highlighted major speed improvements in README
+
 ## [v3.1.0] - 2024-11-22
 
 ### 🎯 MAJOR NEW FEATURES

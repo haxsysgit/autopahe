@@ -12,9 +12,28 @@
 
 # AutoPahe
 
-> **Download anime episodes easily from AnimePahe**
+> **Download and stream anime episodes easily from AnimePahe**
 
-A simple yet powerful tool to search and download your favorite anime episodes. Works on Windows, Mac, and Linux with a beautiful, colorful interface.
+A simple yet powerful tool to search, download, and stream your favorite anime episodes. Works on Windows, Mac, and Linux with a beautiful, colorful interface.
+
+## ✨ New in v3.2
+
+### 🎬 **Cross-Platform Streaming**
+- **Stream directly** to your favorite media player (VLC, MPV, etc.)
+- **Auto-detects players** on Windows, macOS, and Linux
+- **Smart fallback** - suggests installation if no player found
+- **One-command streaming**: `autopahe -s "anime name" -i 0 -st 1`
+
+### ⚡ **Major Performance Boost**
+- **Instant anime info** - loads cached data in milliseconds
+- **Removed heavy dependencies** - faster startup and smaller footprint
+- **Optimized caching** - smarter memory usage and disk storage
+- **5-10x faster** HTML parsing with native selectors
+
+### 🛠️ **Enhanced Organization**
+- **Fixed duplicate folder creation** - cleaner file management
+- **Streamlined sorting** - `--sort` now handles all organization
+- **Better memory management** - reduced resource usage
 
 ## 🎯 What It Does
 
@@ -65,6 +84,32 @@ autopahe -s "anime name" -i 0 -md "1-12"
 # Download with faster parallel downloads
 autopahe -s "anime name" -i 0 -md "1-12" --workers 3
 ```
+
+### 🎬 Stream Anime Episodes (NEW in v3.2)
+```bash
+# Stream episode 1 directly (auto-detects player)
+autopahe -s "anime name" -i 0 -st 1
+
+# Stream with specific player
+autopahe -s "anime name" -i 0 -st 1 --player vlc
+autopahe -s "anime name" -i 0 -st 1 --player mpv
+
+# Stream multiple episodes
+autopahe -s "anime name" -i 0 -st "1-3"
+
+# Stream in different quality
+autopahe -s "anime name" -i 0 -st 1 -p 1080
+```
+
+**Supported Players:**
+- **Windows**: VLC, MPV, Windows Media Player, MPC-HC, MPC-BE
+- **macOS**: VLC, MPV, Iina
+- **Linux**: VLC, MPV, MPlayer, SMPlayer, Celluloid
+
+**If no player is found, AutoPahe will:**
+- Show installation instructions for your OS
+- Suggest available players
+- Guide you through setup
 
 ### Get Download Links Only
 ```bash

@@ -7,40 +7,26 @@ import sys
 import time
 import argparse
 import logging
-import subprocess
 import atexit
 from pathlib import Path
-from json import loads,dumps
+import json
+from json import loads, dumps
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 
-# Color imports for terminal output
+# Third-party imports
 from colorama import Fore, Style, init
 init()
-
-# Third-party imports
-import requests
-from bs4 import BeautifulSoup
-
-# Rich imports for loading spinner
 from rich.console import Console
 from rich.spinner import Spinner
 from rich.live import Live
-import threading
-import time
 
 # Get version dynamically from package metadata
 try:
     from importlib.metadata import version
     AUTOPAHE_VERSION = version("autopahe")
-except ImportError:
-    # Fallback for older Python versions
-    try:
-        import pkg_resources
-        AUTOPAHE_VERSION = pkg_resources.get_distribution("autopahe").version
-    except:
-        # Development fallback
-        AUTOPAHE_VERSION = "dev"
+except (ImportError, Exception):
+    AUTOPAHE_VERSION = "dev"  # Development fallback
 
 # Initialize rich console
 console = Console()
@@ -71,11 +57,11 @@ from ap_core.cache import cache_get, cache_set, cache_clear, display_cache_stats
 from ap_core.fuzzy_search import fuzzy_search_anime, fuzzy_engine
 from ap_core.resume_manager import resume_manager, can_resume_download
 from ap_core.collection_manager import collection_manager, WatchStatus
-from ap_core.cookies import clear_cookies
+# Cookie clearing functionality removed - handled by Playwright context
 from ap_core.config import load_app_config, write_sample_config
 
 # Local imports - Features
-from kwikdown import kwik_download
+from kwikdown import kwik_download, kwik_stream, detect_available_player, stream_video
 from features.manager import (
     process_record,
     load_database,
@@ -91,7 +77,6 @@ from features.manager import (
     import_records,
 )
 from features.pahesort import rename_anime, organize_anime
-from features.execution_tracker import log_execution_time, reset_run_count, get_execution_stats
 
 
 ########################################### GLOBAL VARIABLES ######################################
@@ -105,31 +90,66 @@ DOWNLOADS = Path.home() / "Downloads"
 # Default to ERROR level to suppress WARNING messages for clean user output
 logging.basicConfig(
     level=logging.WARNING,
-    format='%(levelname)s: %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('autopahe.log')
-    ]
+    format='%(levelname)s: %(message)s'
 )
 
-
-#######################################################################################################################
-
-# Global record list for tracking downloads
-records = []
-
-# Global search response dictionary
+# Global state variables - initialized once
 search_response_dict = {}
-
-# Global anime selection
+jsonpage_dict = {}
+linkpahe = []
+page = None
+anime_id = None
+session_id = None
 animepicked = ""
-
-# Global episode page format
 episode_page_format = None
 
-# In-memory cache for episode data (faster than disk cache)
-_episode_cache = {}
-_prefetched_pages = {}
+# Cache dictionaries - combined for better memory management
+_cache_store = {
+    'episodes': {},  # Episode data cache
+    'pages': {},     # Prefetched HTML pages
+    'anime': {}      # Complete anime data cache
+}
+
+# Aliases for backward compatibility
+_episode_cache = _cache_store['episodes']
+_prefetched_pages = _cache_store['pages']
+_anime_cache = _cache_store['anime']
+
+def get_anime_cache_key(session_id):
+    """Generate cache key for anime-specific data"""
+    return f"anime_complete_{session_id}"
+
+def cache_anime_data(session_id, episode_data, play_links_data):
+    """Cache complete anime data for instant future access"""
+    cache_key = get_anime_cache_key(session_id)
+    anime_data = {
+        'episode_data': episode_data,
+        'play_links': play_links_data,
+        'timestamp': time.time()
+    }
+    _anime_cache[cache_key] = anime_data
+    # Also persist to disk cache
+    cache_set(cache_key, json.dumps(anime_data).encode())
+
+def get_cached_anime_data(session_id):
+    """Get cached anime data if available"""
+    cache_key = get_anime_cache_key(session_id)
+    
+    # Check memory cache first
+    if cache_key in _anime_cache:
+        return _anime_cache[cache_key]
+    
+    # Check disk cache
+    cached = cache_get(cache_key, max_age_hours=24)
+    if cached:
+        try:
+            anime_data = json.loads(cached.decode())
+            _anime_cache[cache_key] = anime_data
+            return anime_data
+        except Exception:
+            pass
+    
+    return None
 
 ############################################ CLEANUP ##########################################################
 
@@ -165,6 +185,49 @@ def setup_environment():
     print("Setup complete.")
     return True
 
+def get_performance_stats():
+    """Get performance statistics for the current session."""
+    stats = {
+        'cache_efficiency': 0,
+        'memory_usage_mb': 0,
+        'cached_items': 0,
+    }
+    
+    try:
+        # Cache statistics
+        cache_stats = get_cache_stats()
+        stats['cache_efficiency'] = cache_stats.get('hit_rate', 0)
+        stats['cached_items'] = len(_cache_store['episodes']) + len(_cache_store['anime'])
+        
+        # Memory usage (approximate)
+        import sys
+        total_size = 0
+        for cache_dict in _cache_store.values():
+            total_size += sys.getsizeof(cache_dict)
+            for key, val in cache_dict.items():
+                total_size += sys.getsizeof(key) + sys.getsizeof(val)
+        stats['memory_usage_mb'] = total_size / (1024 * 1024)
+    except Exception:
+        pass
+        
+    return stats
+
+def apply_search_filters(results, year_filter=None, status_filter=None):
+    """Apply year and status filters to search results."""
+    if year_filter:
+        try:
+            year = int(year_filter)
+            results = [r for r in results if r.get('year') == year]
+            logging.debug(f"Filtered by year={year}, {len(results)} results remain")
+        except ValueError:
+            pass
+    
+    if status_filter:
+        status_lower = status_filter.lower()
+        results = [r for r in results if status_lower in str(r.get('status', '')).lower()]
+        logging.debug(f"Filtered by status={status_filter}, {len(results)} results remain")
+    
+    return results
 
 def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
     """Search for anime using AnimePahe API with filters and fuzzy matching.
@@ -212,22 +275,7 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
                 logging.debug(f"Found {len(search_response_dict.get('data', []))} cached results")
                 
                 # Apply filters to cached results if provided
-                results = search_response_dict['data']
-                if year_filter:
-                    try:
-                        year = int(year_filter)
-                        results = [r for r in results if r.get('year') == year]
-                        logging.debug(f"Filtered by year={year}, {len(results)} results remain")
-                    except ValueError:
-                        pass
-                
-                if status_filter:
-                    status_lower = status_filter.lower()
-                    results = [r for r in results if status_lower in str(r.get('status', '')).lower()]
-                    logging.debug(f"Filtered by status={status_filter}, {len(results)} results remain")
-                
-                # Update dict with filtered results
-                search_response_dict['data'] = results
+                results = apply_search_filters(search_response_dict['data'], year_filter, status_filter)
                 
                 if not results:
                     print(f"\n❌ No anime found matching your search with the given filters.\n")
@@ -299,26 +347,13 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
                     logging.error("All methods failed to retrieve search results")
                     search_response_dict = {'data': []}
 
-    except requests.exceptions.RequestException as e:
-        # Network error - try Playwright fallback
-        logging.warning(f"Network error ({e}), trying Playwright...")
+    except (requests.exceptions.RequestException, Exception) as e:
+        # Any error - try Playwright fallback once
+        logging.warning(f"Error ({type(e).__name__}: {e}), trying Playwright fallback...")
         try:
             search_response = driver_output(api_url, driver=True, json=True, wait_time=5)
             if search_response:
                 search_response_dict = search_response
-                # Cache the Playwright results as JSON bytes for future instant access
-                cache_set(api_url, dumps(search_response_dict).encode())
-            else:
-                search_response_dict = {'data': []}
-        except Exception:
-            search_response_dict = {'data': []}
-    except Exception as e:
-        logging.warning(f"Parsing/API error ({e}); trying Playwright fallback...")
-        try:
-            search_response = driver_output(api_url, driver=True, json=True, wait_time=5)
-            if search_response:
-                search_response_dict = search_response
-                # Cache the Playwright results as JSON bytes for future instant access
                 cache_set(api_url, dumps(search_response_dict).encode())
             else:
                 search_response_dict = {'data': []}
@@ -335,21 +370,7 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
     logging.info(f"Processing {len(search_response_dict['data'])} search results")
     
     # Apply filters if provided
-    results = search_response_dict['data']
-    if year_filter:
-        try:
-            year = int(year_filter)
-            results = [r for r in results if r.get('year') == year]
-            logging.debug(f"Filtered by year={year}, {len(results)} results remain")
-        except ValueError:
-            pass
-    
-    if status_filter:
-        status_lower = status_filter.lower()
-        results = [r for r in results if status_lower in str(r.get('status', '')).lower()]
-        logging.debug(f"Filtered by status={status_filter}, {len(results)} results remain")
-    
-    # Update dict with filtered results
+    results = apply_search_filters(search_response_dict['data'], year_filter, status_filter)
     search_response_dict['data'] = results
     
     if not results:
@@ -361,6 +382,40 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
         return None
     
     resultlen = len(search_response_dict['data'])
+    
+    # Pre-fetch episode data for all search results to make anime selection instant
+    episode_urls = []
+    for anime in search_response_dict['data']:
+        session_id = anime['session']
+        episode_url = f'https://animepahe.com/api?m=release&id={session_id}&sort=episode_asc&page=1'
+        episode_urls.append(episode_url)
+    
+    # Check which episode URLs need fetching
+    urls_to_fetch = []
+    for url in episode_urls:
+        if url not in _episode_cache:
+            urls_to_fetch.append(url)
+    
+    if urls_to_fetch:
+        print(f"        🚀 Pre-fetching episode data for {len(urls_to_fetch)} anime(s)...")
+        try:
+            # Fetch episode data in parallel
+            episode_results = batch_driver_output(urls_to_fetch, json=True, wait_time=5)
+            if episode_results:
+                cached_count = 0
+                for url, episode_data in episode_results.items():
+                    if episode_data:
+                        # Cache episode data to both memory and disk
+                        _episode_cache[url] = episode_data
+                        cache_set(url, json.dumps(episode_data).encode())
+                        cached_count += 1
+                print(f"        ✅ Cached episode data for {cached_count}/{len(urls_to_fetch)} anime(s)")
+        except Exception as e:
+            logging.debug(f"Episode pre-fetch failed: {e}")
+            print(f"        ⚠ Episode pre-fetch failed, will fetch on demand")
+    else:
+        print(f"        ✅ Episode data already cached for all {len(episode_urls)} anime(s)")
+    
     # Display results using structured design
     from_cache = '_from_cache' in globals() and _from_cache
     Banners.search_results(search_response_dict['data'], from_cache=from_cache)
@@ -404,12 +459,16 @@ def index(arg):
             jsonpage_dict = None
             
             # Try disk cache next
-            cached = cache_get(anime_url_format, max_age_hours=12)  # 12 hours for episode data
+            cached = cache_get(anime_url_format, max_age_hours=24)  # 24 hours for episode data
             if cached:
-                jsonpage_dict = cached
-                logging.debug("✓ Loaded episode list from disk cache")
-                # Store in memory cache for even faster access
-                _episode_cache[anime_url_format] = jsonpage_dict
+                try:
+                    # Parse cached JSON data
+                    jsonpage_dict = json.loads(cached.decode()) if isinstance(cached, bytes) else cached
+                    logging.debug("✓ Loaded episode list from disk cache")
+                    # Store in memory cache for even faster access
+                    _episode_cache[anime_url_format] = jsonpage_dict
+                except Exception as e:
+                    logging.debug(f"Failed to parse cached episode data: {e}")
             else:
                 # Try direct HTTP request first (faster, no browser)
                 try:
@@ -420,7 +479,7 @@ def index(arg):
                         logging.debug("Successfully fetched episode list via HTTP")
                         # Cache the result
                         _episode_cache[anime_url_format] = jsonpage_dict
-                        cache_set(anime_url_format, jsonpage_dict)
+                        cache_set(anime_url_format, json.dumps(jsonpage_dict).encode())
                 except Exception as e:
                     logging.warning(f"HTTP request failed: {e}")
                     # Fall back to Playwright if HTTP fails
@@ -429,7 +488,7 @@ def index(arg):
                     if jsonpage_dict:
                         # Cache the result even from Playwright
                         _episode_cache[anime_url_format] = jsonpage_dict
-                        cache_set(anime_url_format, jsonpage_dict)
+                        cache_set(anime_url_format, json.dumps(jsonpage_dict).encode())
         
         if not jsonpage_dict or 'data' not in jsonpage_dict:
             logging.error("Failed to fetch episode list. The server may be down or rate limiting requests.")
@@ -487,10 +546,23 @@ def about():
         # Prefer prefetched HTML if available
         html = _prefetched_pages.get(episode_page_format)
         if not html:
-            html = driver_output(episode_page_format, driver=True, content=True)
-        soup = BeautifulSoup(html, 'lxml')
-        abt = soup.select('.anime-synopsis')
-        return abt[0].text.strip() if abt else ''
+            # Use Playwright to get synopsis directly
+            browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or 'chrome').lower()
+            context = get_pw_context(browser_choice, headless=True)
+            if context:
+                page = context.new_page()
+                page.goto(episode_page_format, wait_until='domcontentloaded', timeout=30000)
+                synopsis = page.query_selector('.anime-synopsis')
+                if synopsis:
+                    return synopsis.inner_text().strip()
+                page.close()
+        else:
+            # Parse from cached HTML using regex (faster than BeautifulSoup)
+            import re
+            match = re.search(r'<div[^>]*class=["\']anime-synopsis["\'][^>]*>([^<]*)</div>', html, re.DOTALL)
+            if match:
+                return match.group(1).strip()
+        return ''
 
 
 
@@ -604,12 +676,10 @@ def download(arg=1, download_file=True, res = "720"):
             page.wait_for_selector('a.redirect', timeout=30000)
             kwik = page.eval_on_selector('a.redirect', 'el => el.href')
         except Exception:
-            # Fallback to HTML parse
+            # Fallback to Playwright selector
             page.wait_for_timeout(5000)
-            kwik_page = page.content()
-            kwik_cx = BeautifulSoup(kwik_page, 'lxml')
-            a = kwik_cx.find('a', class_='redirect')
-            kwik = a['href'] if a else None
+            redirect_link = page.query_selector('a.redirect')
+            kwik = redirect_link.get_attribute('href') if redirect_link else None
         page.close()
 
     except Exception as e:
@@ -646,7 +716,7 @@ def download(arg=1, download_file=True, res = "720"):
             # Mark download as completed in resume manager
             resume_manager.mark_completed(download_id)
             
-            # Add to collection manager
+            # Add to collection manager (without organizing - --sort handles that)
             entry = collection_manager.add_anime(animepicked)
             episode_file = str(DOWNLOADS / f"{animepicked}_Episode_{arg}.mp4")
             collection_manager.add_episode_file(animepicked, arg, episode_file, organize=False)
@@ -662,6 +732,274 @@ def download(arg=1, download_file=True, res = "720"):
     # ========================================== Multi Download Utility ==========================================
 
     
+def stream_episode(arg=1, player="default", res="720"):
+    """
+    Stream the specified episode by extracting the video URL and launching media player.
+    """
+    global anime_id, animepicked, jsonpage_dict, linkpahe, page
+    
+    try:
+        # Convert the argument to an integer to ensure it is in the correct format
+        arg = int(arg)
+
+        # Retrieve the session ID for the selected episode from the global jsonpage_dict
+        episode_session = jsonpage_dict['data'][arg - 1]['session']
+        
+        # Check if we have cached play page data for this anime
+        cached_anime = get_cached_anime_data(anime_id)
+        if cached_anime and 'play_links' in cached_anime:
+            print(f"        ⚡ Using cached streaming data for instant access")
+            play_links = cached_anime['play_links']
+            
+            # Find the specific episode's play links
+            episode_key = f"{anime_id}_{episode_session}"
+            if episode_key in play_links:
+                dload_items = play_links[episode_key]
+                
+                # Filter download links based on requested resolution
+                min_resolution = 360 if res in ['360', '480'] else 720
+                
+                # Build list of (href, resolution) tuples
+                link_tuples = []
+                for item in dload_items:
+                    href = item.get('href', '')
+                    text = item.get('text', '')
+                    # Parse resolution from text content
+                    resolution_match = re.search(r'(\d+)p', text)
+                    if resolution_match:
+                        resolution = int(resolution_match.group(1))
+                        link_tuples.append((href, resolution))
+                
+                # Sort by resolution (highest first) and filter
+                link_tuples.sort(key=lambda x: x[1], reverse=True)
+                filtered_links = [href for href, res_val in link_tuples if res_val >= min_resolution]
+                
+                if filtered_links:
+                    kwik_url = filtered_links[0]  # Use highest resolution that meets criteria
+                    print(f"        🎯 Using cached kwik URL: {kwik_url}")
+                    
+                    # Stream using cached URL
+                    video_url, headers = kwik_stream(kwik_url, ep=arg, animename=animepicked)
+                    if video_url:
+                        success = stream_video(video_url, headers, player)
+                        if success:
+                            print(f"        ✅ ✅ Episode {arg} streaming completed")
+                        return
+                    else:
+                        print(f"        ❌ Streaming failed for episode {arg}: Could not extract video URL")
+                        return
+                else:
+                    print(f"        ❌ No cached links found for episode {arg} with resolution {res}p")
+                    return
+            else:
+                print(f"        ❌ Episode {arg} not found in cached streaming data")
+                return
+        else:
+            print(f"        🔄 No cached streaming data, fetching from play page...")
+        
+        # Construct the API URL to get the download page for the selected episode
+        api_url = f'https://animepahe.si/api?m=release&id={anime_id}&session={episode_session}'
+        
+        # Construct the URL for the stream page for the specific episode using the session ID
+        stream_page_url = f'https://animepahe.com/play/{anime_id}/{episode_session}'
+
+        # Navigate with shared Playwright context (headless) and extract links then the kwik page
+        browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or 'chrome').lower()
+        try:
+            context = get_pw_context(browser_choice, headless=True)
+            if context is None:
+                logging.error("Playwright context not available")
+                return False
+            page = context.new_page()
+            page.goto(stream_page_url, wait_until='domcontentloaded', timeout=60000)
+        except Exception as e:
+            logging.error(f"Playwright navigation failed: {e}")
+            try:
+                if 'page' in locals():
+                    page.close()
+            except Exception:
+                pass
+            return False
+        
+        # Wait for dropdown links to be present
+        try:
+            page.wait_for_selector('a.dropdown-item[target="_blank"]', timeout=30000)
+        except Exception:
+            pass
+        
+        # Extract links with their text content (which contains resolution info)
+        dload_items = page.eval_on_selector_all(
+            'a.dropdown-item[target="_blank"]', 
+            'els => els.map(e => ({href: e.href, text: e.textContent}))'
+        ) or []
+        
+        # Cache the play page data for future instant access
+        if dload_items:
+            episode_key = f"{anime_id}_{episode_session}"
+            cached_anime = get_cached_anime_data(anime_id)
+            if cached_anime:
+                if 'play_links' not in cached_anime:
+                    cached_anime['play_links'] = {}
+                cached_anime['play_links'][episode_key] = dload_items
+                cache_anime_data(anime_id, cached_anime['episode_data'], cached_anime['play_links'])
+                logging.debug(f"Cached play page data for episode {arg}")
+            else:
+                # Create new anime cache entry using current episode data
+                if 'jsonpage_dict' in globals() and jsonpage_dict:
+                    episode_data = jsonpage_dict
+                    play_links = {episode_key: dload_items}
+                    cache_anime_data(anime_id, episode_data, play_links)
+                    logging.debug(f"Created new anime cache entry for episode {arg}")
+        
+        # Debug: Log all found links
+        logging.debug(f"Found {len(dload_items)} download links total")
+        for item in dload_items[:5]:  # Log first 5 links
+            logging.debug(f"  Link: {item.get('text', 'unknown')} -> {item.get('href', 'no-url')}")
+        
+        # Filter download links based on requested resolution
+        # Parse resolution from text content, not URL
+        min_resolution = 360 if res in ['360', '480'] else 720
+        
+        # Build list of (href, resolution) tuples
+        link_tuples = []
+        for item in dload_items:
+            text = item.get('text', '')
+            href = item.get('href', '')
+            
+            # Extract resolution from text (e.g., "360p", "720p", "1080p")
+            res_match = re.search(r'(\d{3,4})p', text)
+            if res_match and href:
+                resolution = int(res_match.group(1))
+                # Filter by min resolution and exclude English dubs
+                if resolution >= min_resolution and 'eng' not in text.lower():
+                    link_tuples.append((href, resolution))
+        
+        # Sort by resolution (lowest first)
+        link_tuples.sort(key=lambda x: x[1])
+        linkpahe = [href for href, _ in link_tuples]
+        
+        if not linkpahe:
+            raise ValueError(f"No valid streaming link found for episode {arg}")
+        
+        # Navigate to the selected download link based on requested resolution
+        res = str(res)
+        
+        # Find the best matching resolution
+        if res == '360':
+            # Get lowest resolution available
+            kwik = linkpahe[0]
+        elif res == '480':
+            # Try to find 480p or closest
+            kwik = linkpahe[0]  # Use lowest available
+        elif res == '720':
+            # Try to find 720p or closest
+            if len(linkpahe) >= 2:
+                kwik = linkpahe[1]  # Use second (usually 720p)
+            else:
+                kwik = linkpahe[-1]  # Use highest available
+        elif res == '1080':
+            # Try to find 1080p or closest
+            kwik = linkpahe[-1]  # Use highest available
+        elif res == 'best':
+            # Get highest resolution available
+            kwik = linkpahe[-1]
+        elif res == 'worst':
+            # Get lowest resolution available
+            kwik = linkpahe[0]
+        else:
+            # Default to 720p
+            if len(linkpahe) >= 2:
+                kwik = linkpahe[1]
+            else:
+                kwik = linkpahe[-1]
+        
+        if not kwik:
+            raise ValueError(f"No valid streaming link found for episode {arg}")
+
+        print(f"🎬 Preparing to stream episode {arg} of {animepicked}")
+        print(f"🔗 Extracted kwik URL: {kwik[:50]}..." if len(kwik) > 50 else f"🔗 Extracted kwik URL: {kwik}")
+        
+        # Close the Playwright page before streaming
+        try:
+            page.close()
+        except:
+            pass
+        
+        # Detect available player
+        if player == "default":
+            detected_player = detect_available_player()
+            if not detected_player:
+                print("❌ No media player found. Please install mpv, vlc, or mplayer.")
+                print("💡 Installation commands:")
+                print("   Ubuntu/Debian: sudo apt install mpv vlc")
+                print("   macOS: brew install mpv vlc")
+                print("   Windows: Download from mpv.io or videolan.org")
+                return False
+            
+            player = detected_player
+            print(f"📺 Using detected player: {player}")
+        
+        # Extract video URL and stream
+        video_url, headers = kwik_stream(url=kwik, ep=arg, animename=animepicked)
+        
+        if video_url:
+            success = stream_video(video_url, headers, player)
+            if success:
+                Banners.success_message(f"✅ Episode {arg} streaming completed")
+                return True
+            else:
+                print(f"❌ Failed to stream episode {arg}")
+                return False
+        else:
+            print(f"❌ Failed to extract video URL for episode {arg}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Streaming failed for episode {arg}: {e}")
+        return False
+
+
+def multi_stream(arg: str, player="default", resolution="720"):
+    """
+    Stream multiple episodes sequentially.
+    """
+    # Parse input like '2,3,5-7' into [2,3,5,6,7]
+    eps = []
+    for part in arg.split(','):
+        if '-' in part:
+            start, end = map(int, part.split('-'))
+            eps.extend(range(start, end + 1))
+        elif part.isdigit():
+            eps.append(int(part))
+
+    Banners.info_message(f"🎬 Starting sequential streaming of {len(eps)} episodes")
+    
+    # Sequential streaming to avoid Playwright threading issues
+    completed = 0
+    failed = []
+    
+    for ep in eps:
+        try:
+            success = stream_episode(arg=ep, player=player, res=resolution)
+            if success:
+                completed += 1
+                Banners.success_message(f"Episode {ep} completed successfully ({completed}/{len(eps)})")
+            else:
+                failed.append(ep)
+                logging.error(f"Episode {ep} failed to stream")
+        except Exception as e:
+            failed.append(ep)
+            logging.error(f"Episode {ep} failed: {e}")
+    
+    # Report results
+    if failed:
+        print(f"\n⚠️ Streaming completed with {len(failed)} failed episodes: {failed}")
+    else:
+        print(f"\n✅ All {len(eps)} episodes streamed successfully!")
+    
+    return len(failed) == 0
+
+
 def multi_download(arg: str, download_file=True, resolution="720", max_workers=1, enable_notifications=False):
     """
     Downloads multiple episodes sequentially.
@@ -769,10 +1107,13 @@ def interactive_main():
 def command_main(args):
     global barg
     barg = args.browser  # Selected browser
+    records = []  # Initialize records list for tracking operations
     sarg = args.search  # Search query for anime
     iarg = args.index  # Index of selected anime
     sdarg = args.single_download  # Argument for single episode download
     mdarg = args.multi_download  # Argument for multi-episode download
+    starg = args.stream  # Argument for streaming
+    player_arg = args.player  # Media player for streaming
     abtarg = args.about  # Flag for displaying anime information
     rarg = args.record  # Argument for interacting with records
     dtarg = args.execution_data  # New argument for execution stats by date
@@ -817,9 +1158,6 @@ def command_main(args):
     # Configure resume manager
     resume_manager.max_retries = max_retries
 
-    # Reset the run count
-    reset_run_count()
-
     # Note: Browser is only launched when actually needed (during downloads)
     # This avoids unnecessary resource usage and startup delays
     
@@ -827,8 +1165,7 @@ def command_main(args):
     if cache_cmd:
         if cache_cmd == 'clear':
             cache_clear()
-            clear_cookies()
-            print("✓ Cache and cookies cleared")
+            print("✓ Cache cleared")
             return
         elif cache_cmd == 'stats':
             stats = get_cache_stats()
@@ -1011,27 +1348,47 @@ def command_main(args):
         try:
             selected = search_response_dict['data'][iarg]
             # Set globals required by downstream functions
-            global session_id, episode_page_format, animepicked
+            global session_id, episode_page_format, animepicked, anime_id
             animepicked = selected.get('title')
             session_id = selected.get('session')
+            anime_id = session_id  # Set anime_id for streaming/download functions
             episode_page_format = f'https://animepahe.com/anime/{session_id}'
             anime_url_format = f'https://animepahe.com/api?m=release&id={session_id}&sort=episode_asc&page=1'
 
-            # Prefetch JSON (episodes)
-            json_results = batch_driver_output([anime_url_format], json=True, wait_time=5)
-            if json_results and anime_url_format in json_results and json_results[anime_url_format]:
-                _episode_cache[anime_url_format] = json_results[anime_url_format]
-                cache_set(anime_url_format, json_results[anime_url_format])
+            # Prefetch JSON (episodes) - check both memory and disk cache
+            if anime_url_format not in _episode_cache:
+                # Try disk cache first
+                cached_data = cache_get(anime_url_format, max_age_hours=24)
+                if cached_data:
+                    try:
+                        # Parse cached JSON data
+                        episode_data = json.loads(cached_data.decode()) if isinstance(cached_data, bytes) else cached_data
+                        _episode_cache[anime_url_format] = episode_data
+                        logging.debug("✓ Loaded episode data from disk cache")
+                    except Exception as e:
+                        logging.debug(f"Failed to parse cached data: {e}")
+                        # If cache is corrupted, fetch fresh data
+                        json_results = batch_driver_output([anime_url_format], json=True, wait_time=5)
+                        if json_results and anime_url_format in json_results and json_results[anime_url_format]:
+                            _episode_cache[anime_url_format] = json_results[anime_url_format]
+                            cache_set(anime_url_format, json.dumps(json_results[anime_url_format]).encode())
+                else:
+                    # No cache found, fetch fresh data
+                    json_results = batch_driver_output([anime_url_format], json=True, wait_time=5)
+                    if json_results and anime_url_format in json_results and json_results[anime_url_format]:
+                        _episode_cache[anime_url_format] = json_results[anime_url_format]
+                        cache_set(anime_url_format, json.dumps(json_results[anime_url_format]).encode())
+            else:
+                logging.debug("✓ Episode data already in memory cache, skipping all fetches")
 
-            # Prefetch HTML (about page)
-            html_results = batch_driver_output([episode_page_format], content=True, wait_time=5)
-            if html_results and episode_page_format in html_results and html_results[episode_page_format]:
-                _prefetched_pages[episode_page_format] = html_results[episode_page_format]
+            # Skip HTML prefetch unless specifically needed (e.g., for about command)
+            # The anime information display doesn't need HTML content, only episode data
+            logging.debug("✓ HTML prefetch skipped (not needed for basic anime info)")
         except Exception as e:
             logging.debug(f"Prefetch skipped due to: {e}")
 
         # Now render index using the prefetched caches (no extra browser work)
-        index(iarg)
+        index_result = index(iarg)
         search_response_dict["data"][iarg]["anime_page"] = episode_page_format
         records.append(search_response_dict['data'][iarg])
         process_record(records, quiet=True)
@@ -1053,6 +1410,24 @@ def command_main(args):
     if sdarg:
         records.append(sdarg)
         download(sdarg,res=parg)
+        process_record(records, update=True, quiet=True)
+        did_download = True
+
+    if starg:
+        if iarg is None:
+            print("❌ Error: Streaming requires anime selection.")
+            print("💡 Please use -i INDEX to select an anime before streaming.")
+            print("   Example: autopahe -s 'anime name' -i 0 -st 1")
+            return
+        
+        records.append(starg)
+        # Handle streaming
+        if '-' in starg or ',' in starg:
+            # Multi-episode streaming
+            multi_stream(starg, player=player_arg, resolution=parg)
+        else:
+            # Single episode streaming
+            stream_episode(arg=starg, player=player_arg, res=parg)
         process_record(records, update=True, quiet=True)
         did_download = True
 
@@ -1164,77 +1539,27 @@ def command_main(args):
             rename_anime(base_path, animepahe=True, dry_run=False)
             organize_anime(base_path, animepahe=True, dry_run=False)
 
-    # Date argument to retrieve execution stats
+    # Date argument to retrieve execution stats (removed for optimization)
     if dtarg:
-        stats = get_execution_stats(dtarg)
-        # print(len(stats))
-        # print(stats.keys())
+        print("Execution stats tracking has been removed for performance optimization.")
+        return  # Exit early to avoid unnecessary code execution
 
-        
-        if len(stats) == 1:
-            for stat in stats:
-                # Convert total time from seconds to minutes
-                total_time_minutes = stats[stat]['total_time_mins']
-
-                total_time_hours = stats[stat]['total_time_hours']
-
-                average_time_mins = stats[stat]['average_time_mins']
-
-                average_time_hours = stats[stat]['average_time_hours']
-                
-                print(f"\nExecution stat for '{dtarg}' -->>\n")
-
-                print(f"\n1.) Total Runs: {stats[stat]['run_count']}")
-                print(f"\n2.) Total Execution Time (Minutes): {total_time_minutes:.2f} minutes")  # Print in minutes
-                print(f"\n3.) Total Execution Time (Minutes): {total_time_hours:.2f} hours")  # Print in hours
-                print(f"\n4.) Average Execution Time (Minutes): {average_time_mins:.2f} minutes")  # Print in minutes
-                print(f"\n5.) Average Execution Time (Hours): {average_time_hours:.2f} hours")  # Print in hours 
-
-        elif len(stats) > 1:
-            for stat in stats:
-                # Convert total time from seconds to minutes
-                total_time_minutes = round(stats[stat]['total_time_mins'],1)
-
-                total_time_hours = round(stats[stat]['total_time_hours'])
-
-                average_time_mins = round(stats[stat]['average_time_mins'])
-
-                average_time_hours = round(stats[stat]['average_time_hours']) 
-                               
-                print(f"\n\nExecution stats for '{stat}' -->>")
-
-                print(f"\n1.) Total Runs: {stats[stat]['run_count']}")
-                print(f"\n2.) Total Execution Time (Minutes): {total_time_minutes:.2f} minutes")  # Print in minutes
-                print(f"\n3.) Total Execution Time (Minutes): {total_time_hours:.2f} hours")  # Print in hours
-                print(f"\n4.) Average Execution Time (Minutes): {average_time_mins:.2f} minutes")  # Print in minutes
-                print(f"\n5.) Average Execution Time (Hours): {average_time_hours:.2f} hours")  # Print in hours 
-
-                print("=============================================================================")
-        else:
-            print(f"\n\nNo execution data found for '{dtarg}'.")
-
-    # Summary combining execution stats and records
+    # Summary combining records
     if summary_arg:
-        stats = get_execution_stats(summary_arg)
-        if stats:
-            print(dumps(stats, indent=4))
         db = load_database()
-        total = len(db)
-        completed = sum(1 for v in db.values() if 'Completed' in str(v.get('status','')))
-        watching = sum(1 for v in db.values() if 'Watching' in str(v.get('status','')))
-        not_started = sum(1 for v in db.values() if 'Not Started' in str(v.get('status','')))
-        print(f"\nRecords summary: total={total}, completed={completed}, watching={watching}, not_started={not_started}")
+        if db:
+            print(dumps(db, indent=4))
+            total = len(db)
+            completed = sum(1 for v in db.values() if 'Completed' in str(v.get('status','')))
+            watching = sum(1 for v in db.values() if 'Watching' in str(v.get('status','')))
+            not_started = sum(1 for v in db.values() if 'Not Started' in str(v.get('status','')))
+            print(f"\nRecords summary: total={total}, completed={completed}, watching={watching}, not_started={not_started}")
     
     # Clean up browser after all operations are complete
     cleanup_browsers()
 
-
-
 # Main entry point for the script that processes arguments and triggers the appropriate actions
 def main():
-    # Reset the run count to start fresh
-    reset_run_count()
-
     # Record the start time of the execution
     start_time = time.perf_counter()
 
@@ -1275,6 +1600,9 @@ def main():
     parser.add_argument('-i', '--index', type=int, help='Specify the index of the desired anime from the search results')
     parser.add_argument('-d', '--single_download', type=int, help='Download a single episode of an anime')
     parser.add_argument('-md', '--multi_download', help='Download multiple episodes of an anime (e.g., 1-12)')
+    parser.add_argument('-st', '--stream', help='Stream episode instead of downloading (e.g., 1 or 1-3)')
+    parser.add_argument('--player', choices=['mpv', 'vlc', 'mplayer', 'default'], 
+                      default='default', help='Media player for streaming (default: auto-detect)')
     parser.add_argument('-l', '--link', help='Display the link to the kwik download page')
     parser.add_argument('-ml', '--multilinks', help='Display multiple links to the kwik download pages')
     parser.add_argument('-a', '--about', help='Output an overview of the anime', action='store_true')
@@ -1388,6 +1716,7 @@ def main():
         args.index is not None,
         args.single_download is not None,
         bool(args.multi_download),
+        bool(args.stream),  # Add streaming argument
         bool(args.link),
         bool(args.multilinks),
         bool(args.about),
@@ -1462,8 +1791,10 @@ def main():
         print("Launching Interactive Mode...\n")
         interactive_main()
 
-    # Log the execution time once the script has finished
-    log_execution_time(start_time)
+    # Display execution time for performance monitoring
+    elapsed = time.perf_counter() - start_time
+    if elapsed > 0.5:  # Only show for non-trivial operations
+        logging.debug(f"Execution completed in {elapsed:.2f} seconds")
 
 
 

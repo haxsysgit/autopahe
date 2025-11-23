@@ -2,10 +2,10 @@
 
 import requests                # For sending HTTP requests and managing sessions
 import os                      # For file/directory management
+import shutil                  # For file system operations and player detection
 import tqdm                    # For progress bar during file download
 import time                    # For delay/retries
 from pathlib import Path
-from bs4 import BeautifulSoup  # For parsing HTML content
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from urllib.parse import urlparse
@@ -157,12 +157,10 @@ def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 30
             pass
         time.sleep(3)
 
-        soup = BeautifulSoup(page.content(), 'lxml')
-        form = soup.find('form')
+        form = page.query_selector('form')
         if not form:
             # Debug: Save HTML content to file for inspection
-            debug_file = str(Path.home() / "autopahe_debug" / f"kwik_debug_{int(time.time())}.html")
-            os.makedirs(os.path.dirname(debug_file), exist_ok=True)
+            debug_file = f"kwik_debug_{ep}_{url.replace('/', '_').replace(':', '')}.html"
             with open(debug_file, 'w', encoding='utf-8') as f:
                 f.write(page.content())
             print(f'Could not locate download form on kwik page')
@@ -186,12 +184,13 @@ def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 30
             
             page.close()
             return
-        hidden = form.find('input', {'type': 'hidden'})
-        if not hidden or not hidden.get('value'):
+        
+        hidden_input = form.query_selector('input[type="hidden"]')
+        if not hidden_input:
             page.close()
             print('Could not extract CSRF token')
             return
-        token = hidden['value']
+        token = hidden_input.get_attribute('value')
         # Capture the actual browser user agent from Playwright
         try:
             ua = page.evaluate("navigator.userAgent") or ""
@@ -247,3 +246,214 @@ def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 30
 
     # Call the actual download function
     download_with_retries(session, posturl, params, headers, animename, ep, chunk_size)
+
+
+def kwik_stream(url, browser="chrome", ep=None, animename=None):
+    """
+    Extract direct video URL for streaming instead of downloading.
+    Returns the video URL and headers needed for streaming.
+    """
+    os.chdir(os.getcwd())  # Ensure we're in current directory
+
+    # Handle pahe.win redirect pages
+    if 'pahe.win' in url:
+        if 'is_verbose' in globals() and is_verbose():
+            print(f'Debug: Detected pahe.win redirect page, extracting final URL...')
+        browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or browser or 'chrome').lower()
+        try:
+            context = get_pw_context(browser_choice, headless=True)
+            if context is None:
+                print('Playwright context not available')
+                return None, None
+            page = context.new_page()
+            page.goto(url, wait_until='domcontentloaded', timeout=60000)
+            
+            # Wait for the redirect link to be available and extract it
+            try:
+                page.wait_for_function('document.querySelector("a.redirect").href.includes("kwik.cx")', timeout=10000)
+                redirect_url = page.eval_on_selector('a.redirect', 'el => el.href')
+                if 'is_verbose' in globals() and is_verbose():
+                    print(f'Debug: Extracted redirect URL: {redirect_url}')
+                url = redirect_url
+                page.close()
+            except Exception as e:
+                if 'is_verbose' in globals() and is_verbose():
+                    print(f'Debug: Failed to extract redirect URL after countdown: {e}')
+                page.close()
+                return None, None
+        except Exception as e:
+            print(f'Failed to handle pahe.win redirect: {e}')
+            return None, None
+
+    posturl = url.replace("/f/", "/d/")  # Build POST endpoint based on pattern
+
+    token = None
+    session = setup_session()  # Robust session with retries
+
+    # Use Playwright to get token and cookies
+    browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or browser or 'chrome').lower()
+    try:
+        context = get_pw_context(browser_choice, headless=True)
+        if context is None:
+            print('Playwright context not available')
+            return None, None
+        page = context.new_page()
+        page.goto(url, wait_until='domcontentloaded', timeout=60000)
+        
+        # Extract form and token
+        form = page.query_selector('form')
+        if not form:
+            page.close()
+            print('Could not find form on page')
+            return None, None
+        
+        hidden = form.query_selector('input[type="hidden"]')
+        if not hidden or not hidden.get_attribute('value'):
+            page.close()
+            print('Could not extract CSRF token')
+            return None, None
+        token = hidden.get_attribute('value')
+        
+        # Capture the actual browser user agent from Playwright
+        try:
+            ua = page.evaluate("navigator.userAgent") or ""
+        except Exception:
+            ua = ""
+        
+        # Transfer cookies from Playwright to requests.Session
+        try:
+            cookies = context.cookies([url])
+        except Exception:
+            cookies = context.cookies()
+        for c in cookies:
+            domain = c.get('domain') or 'kwik.si'
+            session.cookies.set(c['name'], c['value'], domain=domain)
+        page.close()
+    except Exception as e:
+        print('Playwright failed to capture token/cookies:', e)
+        return None, None
+
+    # Construct realistic headers (mimic the browser actually used)
+    parsed = urlparse(url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    is_chromium = 'chrome' in browser_choice or 'chromium' in browser_choice
+
+    headers = {
+        'User-Agent': ua or (
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+            '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' if is_chromium
+            else 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:138.0) Gecko/20100101 Firefox/138.0'
+        ),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Referer': url,               # refer back to the /f/ page
+        'Origin': origin,             # must match the kwik host
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Content-Type': 'application/x-www-form-urlencoded',
+    }
+    if is_chromium:
+        headers.update({
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-User': '?1',
+            'Sec-Ch-Ua': '"Google Chrome";v="120", "Chromium";v="120", "Not=A?Brand";v="99"',
+            'Sec-Ch-Ua-Platform': '"Linux"',
+            'Sec-Ch-Ua-Mobile': '?0',
+        })
+
+    # Token included in form body
+    params = {"_token": token}
+
+    # Make POST request to get the actual video URL
+    try:
+        response = session.post(posturl, data=params, headers=headers, allow_redirects=False, timeout=30)
+        
+        if response.status_code in [301, 302, 303, 307, 308]:
+            # Extract redirect URL (this is the direct video URL)
+            video_url = response.headers.get('Location')
+            if video_url:
+                return video_url, headers
+            else:
+                print("Redirect response without Location header")
+                return None, None
+        elif response.status_code == 200:
+            # Some services might return the video URL in the response body
+            content = response.text
+            import re
+            url_match = re.search(r'https?://[^\s"\'<>]+\.m3u8[^\s"\'<>]*', content)
+            if url_match:
+                return url_match.group(0), headers
+            else:
+                # Return the response URL itself as fallback
+                return response.url, headers
+        else:
+            print(f"Unexpected status code: {response.status_code}")
+            return None, None
+            
+    except Exception as e:
+        print(f"Failed to extract video URL: {e}")
+        return None, None
+
+
+def detect_available_player():
+    """
+    Detect available media players on the system.
+    Returns the first available player from the preferred list.
+    """
+    preferred_players = ['mpv', 'vlc', 'mplayer']
+    
+    for player in preferred_players:
+        if shutil.which(player):
+            return player
+    
+    return None
+
+
+def stream_video(video_url, headers=None, player="mpv"):
+    """
+    Launch media player to stream video from URL.
+    """
+    import subprocess
+    import os
+    
+    if not video_url:
+        print("❌ No video URL available for streaming")
+        return False
+    
+    if not shutil.which(player):
+        print(f"❌ Player '{player}' not found. Please install {player} or use --player to specify another.")
+        available = detect_available_player()
+        if available:
+            print(f"💡 Available player found: {available}")
+        return False
+    
+    try:
+        print(f"🎬 Launching {player} to stream video...")
+        print(f"📺 URL: {video_url[:100]}..." if len(video_url) > 100 else f"📺 URL: {video_url}")
+        
+        # Set environment variables for headers if provided
+        env = os.environ.copy()
+        if headers:
+            # Some players support headers via environment variables
+            if player == 'mpv':
+                env['HTTP_USER_AGENT'] = headers.get('User-Agent', '')
+                env['HTTP_REFERER'] = headers.get('Referer', '')
+        
+        # Launch the player
+        cmd = [player, video_url]
+        if player == 'vlc':
+            cmd.extend(['--http-user-agent', headers.get('User-Agent', '') if headers else ''])
+            cmd.extend(['--http-referrer', headers.get('Referer', '') if headers else ''])
+        
+        subprocess.run(cmd, env=env)
+        return True
+        
+    except KeyboardInterrupt:
+        print("\n⏹️ Streaming stopped by user")
+        return True
+    except Exception as e:
+        print(f"❌ Failed to launch player: {e}")
+        return False

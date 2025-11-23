@@ -167,11 +167,10 @@ class CollectionManager:
             collection_dir: Root directory for anime collection
             metadata_dir: Directory to store metadata (default: ~/.cache/autopahe/collection)
         """
-        self.collection_dir = collection_dir or Path.home() / 'Downloads' / 'Anime'
+        self.collection_dir = collection_dir or Path.home() / 'Downloads'
         self.metadata_dir = metadata_dir or Path.home() / '.cache' / 'autopahe' / 'collection'
         
-        # Create directories if they don't exist
-        self.collection_dir.mkdir(parents=True, exist_ok=True)
+        # Only create metadata directory - don't force create Anime folder
         self.metadata_dir.mkdir(parents=True, exist_ok=True)
         
         self.metadata_file = self.metadata_dir / 'collection.json'

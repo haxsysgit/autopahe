@@ -1,6 +1,6 @@
 [project]
 name = "autopahe"
-version = "3.3.0"
+version = "3.3.1"
 description = "Cross-platform anime downloader for AnimePahe with advanced features: smart caching, cross-platform streaming, notifications, filters, batch downloads, and record management"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -47,7 +47,7 @@ autopahe = "auto_pahe:main"
 include = ["ap_core*", "features*"]
 
 [tool.setuptools]
-py-modules = ["auto_pahe", "kwikdown"]
+py-modules = ["auto_pahe", "kwikdown", "config"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

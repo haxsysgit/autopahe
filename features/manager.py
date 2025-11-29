@@ -3,10 +3,16 @@ import os
 import csv
 import tempfile
 import shutil
-import fcntl
 import logging
 import time
 from pathlib import Path
+
+# Cross-platform file locking support
+try:
+    import fcntl
+    HAS_FCNTL = True
+except ImportError:
+    HAS_FCNTL = False
 
 # Import centralized configuration
 from config import DATABASE_FILE, BACKUPS_DIR
@@ -40,10 +46,12 @@ def load_database():
     ensure_file_exists()
     try:
         with open(DATABASE_FILE, 'r') as f:
-            # Use file locking to prevent concurrent access issues
-            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+            # Use file locking to prevent concurrent access issues (Unix only)
+            if HAS_FCNTL:
+                fcntl.flock(f.fileno(), fcntl.LOCK_SH)
             data = json.load(f)
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            if HAS_FCNTL:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
             
             # Validate data structure
             if not isinstance(data, dict):
@@ -88,20 +96,17 @@ def save_database(data):
         
         with os.fdopen(temp_fd, 'w') as f:
             # Cross-platform file locking (Unix only, Windows will skip)
-            try:
+            if HAS_FCNTL:
                 fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            except (AttributeError, OSError):
-                # fcntl not available on Windows - proceed without locking
+            else:
                 logging.debug("File locking not available on this platform")
             
             json.dump(data, f, indent=4)
             f.flush()
             os.fsync(f.fileno())  # Force write to disk
             
-            try:
+            if HAS_FCNTL:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-            except (AttributeError, OSError):
-                pass
             
         # Atomic move - this is the critical operation
         shutil.move(temp_file, DATABASE_FILE)

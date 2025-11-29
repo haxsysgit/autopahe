@@ -20,7 +20,7 @@ def read_requirements():
 
 setup(
     name="autopahe",
-    version="3.3.0",
+    version="3.3.2",
     author="haxsys",
     author_email="haxsysgit@gmail.com",
     description="Download and stream anime episodes easily from AnimePahe",

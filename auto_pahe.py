@@ -271,7 +271,7 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
             
             try:
                 # Parse cached response and return immediately (INSTANT ACCESS)
-                search_response_dict = loads(search_response)
+                search_response_dict = json.loads(search_response)
                 print(f"        ✅ Parsed cached JSON successfully")
                 logging.debug(f"Found {len(search_response_dict.get('data', []))} cached results")
                 
@@ -330,7 +330,7 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
 
         # Parse response if we got one
         if search_response:
-            search_response_dict = loads(search_response)
+            search_response_dict = json.loads(search_response)
             logging.debug(f"Found {len(search_response_dict.get('data', []))} results")
         else:
             # Step 3: Only use Playwright as last resort (slow, resource intensive)
@@ -341,7 +341,7 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
                 if search_response:
                     search_response_dict = search_response
                     # Cache the Playwright results as JSON bytes for future instant access
-                    cache_set(api_url, dumps(search_response_dict).encode())
+                    cache_set(api_url, json.dumps(search_response_dict).encode())
                     logging.debug(f"Playwright fallback succeeded and cached")
                     # Don't close browser yet - might need it for index/about operations
                 else:
@@ -355,7 +355,7 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
             search_response = driver_output(api_url, driver=True, json=True, wait_time=5)
             if search_response:
                 search_response_dict = search_response
-                cache_set(api_url, dumps(search_response_dict).encode())
+                cache_set(api_url, json.dumps(search_response_dict).encode())
             else:
                 search_response_dict = {'data': []}
         except Exception:
@@ -1414,13 +1414,13 @@ def command_main(args):
             database = load_database()
             
             if str(position) in database:
-                print(dumps(database[str(position)], indent=4))
+                print(json.dumps(database[str(position)], indent=4))
             else:
                 print(f"❌ No record found at position {position}")
         else:
             results = search_record(rarg)
             if results:
-                print(dumps(results, indent=4))
+                print(json.dumps(results, indent=4))
             else:
                 print("No matching records found.")
 
@@ -1432,7 +1432,7 @@ def command_main(args):
             if cmd == "view":
                 print_all_records()
             elif cmd == "search" and len(args_rest) >= 1:
-                print(dumps(search_record(args_rest[0]), indent=4))
+                print(json.dumps(search_record(args_rest[0]), indent=4))
             elif cmd == "delete" and len(args_rest) >= 1:
                 delete_record(args_rest[0])
             elif cmd == "progress" and len(args_rest) >= 2:
@@ -1488,7 +1488,7 @@ def command_main(args):
     if summary_arg:
         db = load_database()
         if db:
-            print(dumps(db, indent=4))
+            print(json.dumps(db, indent=4))
             total = len(db)
             completed = sum(1 for v in db.values() if 'Completed' in str(v.get('status','')))
             watching = sum(1 for v in db.values() if 'Watching' in str(v.get('status','')))

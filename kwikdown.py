@@ -5,6 +5,7 @@ import os                      # For file/directory management
 import shutil                  # For file system operations and player detection
 import tqdm                    # For progress bar during file download
 import time                    # For delay/retries
+import logging                 # For debug logging
 from pathlib import Path
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -87,8 +88,7 @@ def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 30
 
     # Handle pahe.win redirect pages
     if 'pahe.win' in url:
-        if 'is_verbose' in globals() and is_verbose():
-            print(f'Debug: Detected pahe.win redirect page, extracting final URL...')
+        logging.debug('Detected pahe.win redirect page, extracting final URL...')
         browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or browser or 'chrome').lower()
         try:
             context = get_pw_context(browser_choice, headless=True)
@@ -103,13 +103,11 @@ def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 30
                 # Wait for countdown to complete (up to 10 seconds)
                 page.wait_for_function('document.querySelector("a.redirect").href.includes("kwik.cx")', timeout=10000)
                 redirect_url = page.eval_on_selector('a.redirect', 'el => el.href')
-                if 'is_verbose' in globals() and is_verbose():
-                    print(f'Debug: Extracted redirect URL: {redirect_url}')
+                logging.debug(f'Extracted redirect URL: {redirect_url}')
                 url = redirect_url
                 page.close()
             except Exception as e:
-                if 'is_verbose' in globals() and is_verbose():
-                    print(f'Debug: Failed to extract redirect URL after countdown: {e}')
+                logging.debug(f'Failed to extract redirect URL after countdown: {e}')
                 # Fallback: extract from JavaScript
                 try:
                     js_content = page.content()
@@ -117,18 +115,15 @@ def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 30
                     kwik_match = re.search(r'kwik\.cx/f/([a-zA-Z0-9]+)', js_content)
                     if kwik_match:
                         redirect_url = f"https://kwik.cx/f/{kwik_match.group(1)}"
-                        if 'is_verbose' in globals() and is_verbose():
-                            print(f'Debug: Extracted redirect URL from JavaScript: {redirect_url}')
+                        logging.debug(f'Extracted redirect URL from JavaScript: {redirect_url}')
                         url = redirect_url
                         page.close()
                     else:
-                        if 'is_verbose' in globals() and is_verbose():
-                            print('Debug: Could not find kwik.cx URL in JavaScript')
+                        logging.debug('Could not find kwik.cx URL in JavaScript')
                         page.close()
                         return
                 except Exception as js_e:
-                    if 'is_verbose' in globals() and is_verbose():
-                        print(f'Debug: Failed to extract from JavaScript: {js_e}')
+                    logging.debug(f'Failed to extract from JavaScript: {js_e}')
                     page.close()
                     return
         except Exception as e:
@@ -164,23 +159,21 @@ def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 30
             with open(debug_file, 'w', encoding='utf-8') as f:
                 f.write(page.content())
             print(f'Could not locate download form on kwik page')
-            if 'is_verbose' in globals() and is_verbose():
-                print(f'Debug: Page content saved to {debug_file}')
-                print(f'Debug: URL was: {url}')
-                print(f'Debug: Page title: {page.title()}')
+            logging.debug(f'Page content saved to {debug_file}')
+            logging.debug(f'URL was: {url}')
+            logging.debug(f'Page title: {page.title()}')
             
-                # Check for common anti-bot indicators
-                content_lower = page.content().lower()
-                if 'cloudflare' in content_lower:
-                    print('Debug: Cloudflare protection detected')
-                if 'captcha' in content_lower:
-                    print('Debug: CAPTCHA detected')
-                if 'blocked' in content_lower or 'access denied' in content_lower:
-                    print('Debug: Access blocked detected')
-                
-                # Also print first 1000 characters of page content for immediate inspection
-                print(f'Debug: First 1000 chars of page content:')
-                print(page.content()[:1000])
+            # Check for common anti-bot indicators
+            content_lower = page.content().lower()
+            if 'cloudflare' in content_lower:
+                print('Debug: Cloudflare protection detected')
+            if 'captcha' in content_lower:
+                print('Debug: CAPTCHA detected')
+            if 'blocked' in content_lower or 'access denied' in content_lower:
+                print('Debug: Access blocked detected')
+            
+            # Also log first 1000 characters of page content for inspection
+            logging.debug(f'First 1000 chars of page content: {page.content()[:1000]}')
             
             page.close()
             return
@@ -257,8 +250,7 @@ def kwik_stream(url, browser="chrome", ep=None, animename=None):
 
     # Handle pahe.win redirect pages
     if 'pahe.win' in url:
-        if 'is_verbose' in globals() and is_verbose():
-            print(f'Debug: Detected pahe.win redirect page, extracting final URL...')
+        logging.debug('Detected pahe.win redirect page, extracting final URL...')
         browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or browser or 'chrome').lower()
         try:
             context = get_pw_context(browser_choice, headless=True)
@@ -272,13 +264,11 @@ def kwik_stream(url, browser="chrome", ep=None, animename=None):
             try:
                 page.wait_for_function('document.querySelector("a.redirect").href.includes("kwik.cx")', timeout=10000)
                 redirect_url = page.eval_on_selector('a.redirect', 'el => el.href')
-                if 'is_verbose' in globals() and is_verbose():
-                    print(f'Debug: Extracted redirect URL: {redirect_url}')
+                logging.debug(f'Extracted redirect URL: {redirect_url}')
                 url = redirect_url
                 page.close()
             except Exception as e:
-                if 'is_verbose' in globals() and is_verbose():
-                    print(f'Debug: Failed to extract redirect URL after countdown: {e}')
+                logging.debug(f'Failed to extract redirect URL after countdown: {e}')
                 page.close()
                 return None, None
         except Exception as e:

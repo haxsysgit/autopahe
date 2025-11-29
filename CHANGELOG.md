@@ -1,5 +1,67 @@
 # AutoPahe Changelog
 
+## [v3.3.0] - 2025-11-29
+
+### 🗂️ MAJOR RESTRUCTURING
+
+#### Centralized Data Architecture
+- **Unified Data Directory**: All project data now centralized in `data/` folder
+- **Organized Subdirectories**: `records/`, `logs/`, `cache/`, `collection/`, `backups/`
+- **Automatic Migration**: Seamless one-time migration from legacy locations
+- **Privacy Protection**: User data excluded from git via updated `.gitignore`
+- **Portable Mode**: Support for portable installations via `AUTO_PAHE_PORTABLE` env var
+
+#### Database Consolidation
+- **Record Merging**: Combined root `animerecord.json` (87 entries) with `json_data/` version (5 entries)
+- **Zero Data Loss**: All 91 anime records preserved with automatic backups
+- **Enhanced Sync**: Collection manager now syncs with records database for accurate episode counts
+- **Backup System**: Automatic timestamped backups before any data modifications
+
+### 🛠️ IMPROVEMENTS
+
+#### Collection Management
+- **Robust Episode Tracking**: Fixed 0.0% completion issues by syncing with records database
+- **Manual Episode Setting**: New `--collection set-episodes <title> <count>` command
+- **Data Paths Command**: `--collection data-paths` shows current data structure and usage
+- **Smart Title Matching**: Fuzzy matching for sync between collection and records systems
+- **Debug Logging**: Enhanced logging for troubleshooting data sync issues
+
+#### Code Organization
+- **Centralized Configuration**: `config.py` manages all data paths and migration logic
+- **Cleaner Imports**: Reduced hardcoded paths throughout codebase
+- **Modular Architecture**: Clear separation between records (manager.py) and collection (collection_manager.py) systems
+
+### 🔧 CHANGED
+- **Data Locations**: All user data moved from scattered locations to `data/` folder
+- **Migration Logic**: One-time automatic migration with `.migrated` flag to prevent re-runs
+- **Git Structure**: Updated `.gitignore` to protect user privacy while preserving project structure
+- **Legacy Cleanup**: Removed obsolete files and consolidated changelog management
+
+### 🗑️ REMOVED
+- **Root Artifacts**: Cleaned up `autopahe.log`, `cache_backup.json` from root directory
+- **One-time Scripts**: Removed `merge_records.py` after successful migration
+- **Legacy Paths**: Eliminated hardcoded paths in favor of centralized configuration
+
+### 📊 VERIFIED FUNCTIONALITY
+- ✅ 91 anime records successfully migrated and accessible
+- ✅ Collection system shows accurate completion percentages
+- ✅ Automatic migration runs only once with proper backups
+- ✅ New installations work cleanly with `data/.gitkeep`
+- ✅ Privacy protection prevents user data from being tracked
+
+### 📁 NEW FILES
+- `config.py` - Centralized configuration and data path management
+- `data/.gitkeep` - Preserves directory structure for new users
+- `data/records/animerecord.json` - Consolidated anime database (91 entries)
+
+### 🔄 MODIFIED FILES
+- `features/manager.py` - Updated to use centralized config
+- `features/collection_manager.py` - Enhanced sync and data paths commands
+- `auto_pahe.py` - Updated imports and collection handling
+- `.gitignore` - Enhanced privacy protection for user data
+
+---
+
 ## [v3.2.0] - 2024-11-23
 
 ### 🎬 ADDED

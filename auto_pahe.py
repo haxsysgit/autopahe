@@ -8,13 +8,13 @@ import time
 import argparse
 import logging
 import atexit
+import subprocess
 from pathlib import Path
 import json
-from json import loads, dumps
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 
 # Third-party imports
+import requests
 from colorama import Fore, Style, init
 init()
 from rich.console import Console
@@ -53,10 +53,11 @@ class LoadingSpinner:
 # Local imports - Core functionality
 from ap_core.banners import Banners
 from ap_core.browser import driver_output, cleanup_browsers, get_request_session, get_pw_context, batch_driver_output
-from ap_core.cache import cache_get, cache_set, cache_clear, display_cache_stats, cache_warm, export_cache, import_cache, get_cache_stats
+from ap_core.cache import cache_get, cache_set, cache_clear, display_cache_stats, get_cache_stats
 from ap_core.fuzzy_search import fuzzy_search_anime, fuzzy_engine
-from ap_core.resume_manager import resume_manager, can_resume_download
-from ap_core.collection_manager import collection_manager, WatchStatus
+from ap_core.resume_manager import resume_manager
+from features.collection_manager import collection_manager, WatchStatus, handle_collection_commands
+from ap_core.notifications import notify_download_complete, notify_download_failed
 # Cookie clearing functionality removed - handled by Playwright context
 from ap_core.config import load_app_config, write_sample_config
 
@@ -436,7 +437,7 @@ def index(arg):
     """
     print("\n")  # Don't clear screen, just add spacing
 
-    global jsonpage_dict, session_id, animepicked, episode_page_format, search_response_dict
+    global jsonpage_dict, session_id, animepicked, episode_page_format
 
     try:
         # Get anime data from search results
@@ -568,7 +569,7 @@ def about():
 
 
 
-def download(arg=1, download_file=True, res = "720"):
+def download(arg=1, download_file=True, res = "720", prefer_dub=False):
     """
     Download the specified episode by navigating with Playwright and extracting the download link.
     """
@@ -621,9 +622,13 @@ def download(arg=1, download_file=True, res = "720"):
             res_match = re.search(r'(\d{3,4})p', text)
             if res_match and href:
                 resolution = int(res_match.group(1))
-                # Filter by min resolution and exclude English dubs
-                if resolution >= min_resolution and 'eng' not in text.lower():
-                    link_tuples.append((href, resolution))
+                # Filter by audio preference: dub (eng) or sub (non-eng)
+                has_eng = 'eng' in text.lower()
+                if resolution >= min_resolution:
+                    if prefer_dub and has_eng:
+                        link_tuples.append((href, resolution))
+                    elif not prefer_dub and not has_eng:
+                        link_tuples.append((href, resolution))
         
         # Sort by resolution (lowest first)
         link_tuples.sort(key=lambda x: x[1])
@@ -732,11 +737,11 @@ def download(arg=1, download_file=True, res = "720"):
     # ========================================== Multi Download Utility ==========================================
 
     
-def stream_episode(arg=1, player="default", res="720"):
+def stream_episode(arg=1, player="default", res="720", prefer_dub=False):
     """
     Stream the specified episode by extracting the video URL and launching media player.
     """
-    global anime_id, animepicked, jsonpage_dict, linkpahe, page
+    global page
     
     try:
         # Convert the argument to an integer to ensure it is in the correct format
@@ -870,9 +875,13 @@ def stream_episode(arg=1, player="default", res="720"):
             res_match = re.search(r'(\d{3,4})p', text)
             if res_match and href:
                 resolution = int(res_match.group(1))
-                # Filter by min resolution and exclude English dubs
-                if resolution >= min_resolution and 'eng' not in text.lower():
-                    link_tuples.append((href, resolution))
+                # Filter by audio preference: dub (eng) or sub (non-eng)
+                has_eng = 'eng' in text.lower()
+                if resolution >= min_resolution:
+                    if prefer_dub and has_eng:
+                        link_tuples.append((href, resolution))
+                    elif not prefer_dub and not has_eng:
+                        link_tuples.append((href, resolution))
         
         # Sort by resolution (lowest first)
         link_tuples.sort(key=lambda x: x[1])
@@ -959,7 +968,7 @@ def stream_episode(arg=1, player="default", res="720"):
         return False
 
 
-def multi_stream(arg: str, player="default", resolution="720"):
+def multi_stream(arg: str, player="default", resolution="720", prefer_dub=False):
     """
     Stream multiple episodes sequentially.
     """
@@ -980,7 +989,7 @@ def multi_stream(arg: str, player="default", resolution="720"):
     
     for ep in eps:
         try:
-            success = stream_episode(arg=ep, player=player, res=resolution)
+            success = stream_episode(arg=ep, player=player, res=resolution, prefer_dub=prefer_dub)
             if success:
                 completed += 1
                 Banners.success_message(f"Episode {ep} completed successfully ({completed}/{len(eps)})")
@@ -1000,7 +1009,7 @@ def multi_stream(arg: str, player="default", resolution="720"):
     return len(failed) == 0
 
 
-def multi_download(arg: str, download_file=True, resolution="720", max_workers=1, enable_notifications=False):
+def multi_download(arg: str, download_file=True, resolution="720", max_workers=1, enable_notifications=False, prefer_dub=False):
     """
     Downloads multiple episodes sequentially.
     Note: Parallel downloads disabled due to Playwright threading incompatibility.
@@ -1028,7 +1037,7 @@ def multi_download(arg: str, download_file=True, resolution="720", max_workers=1
     
     for ep in eps:
         try:
-            download(arg=ep, download_file=download_file, res=str(resolution))
+            download(arg=ep, download_file=download_file, res=str(resolution), prefer_dub=prefer_dub)
             completed += 1
             Banners.success_message(f"Episode {ep} completed successfully ({completed}/{len(eps)})")
         except Exception as e:
@@ -1079,6 +1088,9 @@ def interactive_main():
     # Display anime info
     info = about()
     Banners.i_info(info)
+    
+    # Initialize records list for tracking operations
+    records = []
     
     # Download selection
     print("\nDownload Options:")
@@ -1216,81 +1228,9 @@ def command_main(args):
         return
     
     # Handle Collection Manager commands
-    if collection_cmd:
-        """Execute collection management commands."""
-        if collection_cmd == 'stats':
-            # Display collection statistics
-            stats = collection_manager.get_statistics()
-            print(f"\n📚 Collection Statistics:")
-            print(f"  Total Anime: {stats['total_anime']}")
-            print(f"  Total Episodes: {stats['total_episodes']}")
-            print(f"  Total Size: {stats['total_size_gb']:.2f} GB")
-            print(f"  Completion Rate: {stats['completion_rate']:.1f}%")
-            print(f"  Missing Episodes: {stats['missing_episodes']}")
-            if stats['average_rating'] > 0:
-                print(f"  Average Rating: {stats['average_rating']:.1f}/10")
-            
-            print(f"\n📊 Watch Status:")
-            for status, count in stats['watch_status'].items():
-                if count > 0:
-                    print(f"  {status.replace('_', ' ').title()}: {count}")
-            
-            if stats['top_rated']:
-                print(f"\n⭐ Top Rated:")
-                for title, rating in stats['top_rated']:
-                    print(f"  • {title}: {rating}/10")
-            
-            if stats['recently_watched']:
-                print(f"\n📅 Recently Watched:")
-                for title, date in stats['recently_watched'][:3]:
-                    print(f"  • {title}")
-            return
-        
-        elif collection_cmd == 'organize':
-            # Organize collection files
-            print("\n🗂️ Organizing collection files...")
-            for entry in collection_manager.collection.values():
-                for ep_num, file_path in entry.file_paths.items():
-                    if os.path.exists(file_path):
-                        new_path = collection_manager.add_episode_file(
-                            entry.title, ep_num, file_path, organize=True
-                        )
-                        if new_path != file_path:
-                            print(f"  ✓ Organized: {entry.title} - Episode {ep_num}")
-            print("✅ Collection organized")
-            return
-        
-        elif collection_cmd == 'duplicates':
-            # Find and optionally remove duplicate files
-            print("\n🔍 Detecting duplicate files...")
-            duplicates = collection_manager.detect_duplicates()
-            if duplicates:
-                print(f"Found {len(duplicates)} sets of duplicates:")
-                for file_hash, paths in duplicates[:5]:  # Show first 5
-                    print(f"  • {len(paths)} copies of same file:")
-                    for path in paths[:2]:  # Show first 2 paths
-                        print(f"    - {os.path.basename(path)}")
-                
-                # Offer to clean duplicates
-                response = input("\nRemove duplicates (keep organized versions)? (y/n): ")
-                if response.lower() == 'y':
-                    removed = collection_manager.cleanup_duplicates(keep_organized=True)
-                    print(f"✅ Removed {removed} duplicate files")
-            else:
-                print("✅ No duplicates found")
-            return
-        
-        elif collection_cmd == 'export':
-            # Export collection
-            export_path = collection_path or 'collection_export.json'
-            collection_manager.export_collection(export_path, format='json', include_stats=True)
-            print(f"✅ Collection exported to: {export_path}")
-            return
-        
-        elif collection_cmd == 'import':
-            # Import collection (would need implementation)
-            print("⚠️ Import functionality coming soon")
-            return
+    if collection_cmd is not None:
+        handle_collection_commands(collection_cmd, collection_manager)
+        return
     
     # Handle watch status updates
     if watch_status and sarg and iarg is not None:
@@ -1409,7 +1349,7 @@ def command_main(args):
     # Single Download function
     if sdarg:
         records.append(sdarg)
-        download(sdarg,res=parg)
+        download(sdarg, res=parg, prefer_dub=args.dub)
         process_record(records, update=True, quiet=True)
         did_download = True
 
@@ -1424,16 +1364,16 @@ def command_main(args):
         # Handle streaming
         if '-' in starg or ',' in starg:
             # Multi-episode streaming
-            multi_stream(starg, player=player_arg, resolution=parg)
+            multi_stream(starg, player=player_arg, resolution=parg, prefer_dub=args.dub)
         else:
             # Single episode streaming
-            stream_episode(arg=starg, player=player_arg, res=parg)
+            stream_episode(arg=starg, player=player_arg, res=parg, prefer_dub=args.dub)
         process_record(records, update=True, quiet=True)
         did_download = True
 
     if larg:
         records.append(larg)
-        download(larg , download_file=False,res=parg)
+        download(larg, download_file=False, res=parg, prefer_dub=args.dub)
         process_record(records, update=True, quiet=True)
 
 
@@ -1450,13 +1390,13 @@ def command_main(args):
     # Multi Download function
     if mdarg:
         records.append(mdarg)
-        multi_download(mdarg,download_file=True,resolution=parg, max_workers=args.workers, enable_notifications=enable_notifications)
+        multi_download(mdarg, download_file=True, resolution=parg, max_workers=args.workers, enable_notifications=enable_notifications, prefer_dub=args.dub)
         process_record(records, update=True, quiet=True)
         did_download = True
 
     if mlarg:
         records.append(mlarg)
-        multi_download(mlarg,download_file=False,resolution=parg, max_workers=args.workers, enable_notifications=enable_notifications)
+        multi_download(mlarg, download_file=False, resolution=parg, max_workers=args.workers, enable_notifications=enable_notifications, prefer_dub=args.dub)
         process_record(records, update=True, quiet=True)
         did_download = True
 
@@ -1631,6 +1571,7 @@ def main():
     parser.add_argument('--status', type=str, help='Filter search results by status (e.g., "Finished Airing")')
     parser.add_argument('--season', type=int, help='Download entire season (12-13 eps). Example: --season 1 downloads eps 1-12')
     parser.add_argument('--notify', action='store_true', help='Enable desktop notifications on download complete/fail')
+    parser.add_argument('--dub', action='store_true', help='Prefer English dubbed versions (default: subbed)')
     parser.add_argument('--cache', choices=['clear', 'stats'], help='Cache management: clear (remove all) or stats (show info)')
     parser.add_argument('--setup', action='store_true', help='Initial setup: write config and install browser')
     
@@ -1649,8 +1590,8 @@ def main():
                       help='Maximum retry attempts for failed downloads (default: 3)')
     
     # Collection Manager Features
-    parser.add_argument('--collection', choices=['stats', 'organize', 'duplicates', 'export', 'import'],
-                      help='Collection management: stats, organize files, find duplicates, export/import')
+    parser.add_argument('--collection', nargs='*', 
+                      help='Collection management: stats | view | show <title> | episodes <title> | search <query> | organize | duplicates | export <path> | import <path>')
     parser.add_argument('--collection-path', type=str,
                       help='Path for collection operations (export/import file path)')
     parser.add_argument('--watch-status', choices=['watching', 'completed', 'on_hold', 'dropped', 'plan_to_watch'],
@@ -1737,7 +1678,7 @@ def main():
         # New feature flags
         bool(args.resume),
         bool(args.resume_stats),
-        bool(args.collection),
+        args.collection is not None,
         bool(args.watch_status),
         args.watch_progress is not None,
         args.rate is not None,

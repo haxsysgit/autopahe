@@ -19,6 +19,9 @@ from enum import Enum
 import re
 import logging
 
+# Import centralized configuration
+from config import COLLECTION_DIR, COLLECTION_METADATA_FILE, LOGS_DIR, DATA_DIR
+
 logger = logging.getLogger(__name__)
 
 
@@ -94,6 +97,11 @@ class AnimeEntry:
             Percentage of episodes downloaded
         """
         if self.total_episodes == 0:
+            # If no episode metadata available, estimate based on downloaded episodes
+            # or return 0 if we have no information
+            if len(self.downloaded_episodes) > 0:
+                # Assume we have at least the downloaded episodes, but can't calculate completion
+                return 0.0  # Keep 0.0% but indicate we have episodes
             return 0.0
         return (len(self.downloaded_episodes) / self.total_episodes) * 100
     
@@ -165,20 +173,87 @@ class CollectionManager:
         
         Args:
             collection_dir: Root directory for anime collection
-            metadata_dir: Directory to store metadata (default: ~/.cache/autopahe/collection)
+            metadata_dir: Directory to store metadata (now uses centralized config)
         """
         self.collection_dir = collection_dir or Path.home() / 'Downloads'
-        self.metadata_dir = metadata_dir or Path.home() / '.cache' / 'autopahe' / 'collection'
+        self.metadata_dir = metadata_dir or COLLECTION_DIR
         
-        # Only create metadata directory - don't force create Anime folder
-        self.metadata_dir.mkdir(parents=True, exist_ok=True)
-        
-        self.metadata_file = self.metadata_dir / 'collection.json'
+        # Use centralized paths
+        self.metadata_file = COLLECTION_METADATA_FILE
         self.collection: Dict[str, AnimeEntry] = {}
         
         # Load existing collection
         self.load_collection()
+        
+        # Sync with records database to get episode metadata
+        self.sync_from_records()
     
+    def sync_from_records(self):
+        """
+        Sync collection metadata with records database to get episode information.
+        Updates total_episodes for existing anime entries based on records database.
+        """
+        try:
+            # Import here to avoid circular imports
+            from features.manager import load_database
+            
+            records_db = load_database()
+            updated_count = 0
+            
+            logger.info(f"Starting sync: {len(self.collection)} collection entries, {len(records_db)} records")
+            
+            # Log collection titles for debugging
+            collection_titles = list(self.collection.keys())
+            record_titles = [data.get('title') for data in records_db.values() if data.get('title')]
+            
+            logger.debug(f"Collection titles: {collection_titles}")
+            logger.debug(f"Record titles: {record_titles}")
+            
+            for record_id, record_data in records_db.items():
+                title = record_data.get('title')
+                max_episodes = record_data.get('max_episode', 0)
+                
+                if title and title in self.collection:
+                    entry = self.collection[title]
+                    if entry.total_episodes == 0 and max_episodes > 0:
+                        entry.total_episodes = max_episodes
+                        updated_count += 1
+                        logger.info(f"Updated {title} with {max_episodes} episodes")
+                        
+                        # If episodes exist but total_episodes was 0, update completion
+                        if entry.downloaded_episodes and max_episodes > 0:
+                            logger.info(f"{title} now shows {entry.get_completion_percentage():.1f}% completion")
+                elif title:
+                    # Check for fuzzy match if exact match fails
+                    normalized_title = title.lower().strip()
+                    for collection_title in self.collection:
+                        if collection_title.lower().strip() == normalized_title:
+                            entry = self.collection[collection_title]
+                            if entry.total_episodes == 0 and max_episodes > 0:
+                                entry.total_episodes = max_episodes
+                                updated_count += 1
+                                logger.info(f"Fuzzy matched '{collection_title}' -> '{title}' with {max_episodes} episodes")
+                                break
+            
+            # Check which collection entries didn't get matched
+            unmatched = []
+            for collection_title in self.collection:
+                entry = self.collection[collection_title]
+                if entry.total_episodes == 0:
+                    unmatched.append(collection_title)
+            
+            if unmatched:
+                logger.warning(f"Anime without episode metadata: {unmatched}")
+            
+            if updated_count > 0:
+                self.save_collection()
+                logger.info(f"Synced {updated_count} anime with episode metadata")
+            else:
+                logger.debug("No anime needed episode metadata sync")
+                
+        except Exception as e:
+            logger.error(f"Failed to sync with records database: {e}")
+
     def sanitize_filename(self, filename: str) -> str:
         """
         Sanitize filename for filesystem compatibility.
@@ -556,6 +631,244 @@ class CollectionManager:
             WatchStatus.UNWATCHED: 'Plan to Watch'
         }
         return mapping.get(status, 'Plan to Watch')
+
+
+def handle_collection_commands(collection_cmd, collection_manager_instance):
+    """
+    Handle collection management commands.
+    
+    Args:
+        collection_cmd: List of command arguments from argparse
+        collection_manager_instance: CollectionManager instance to use
+    """
+    if not collection_cmd:
+        collection_cmd = ['stats']  # Default to stats if no arguments
+    
+    command = collection_cmd[0]
+    args_list = collection_cmd[1:] if len(collection_cmd) > 1 else []
+    
+    if command == 'stats':
+        # Display collection statistics
+        stats = collection_manager_instance.get_statistics()
+        print(f"\n📚 Collection Statistics:")
+        print(f"  Total Anime: {stats['total_anime']}")
+        print(f"  Total Episodes: {stats['total_episodes']}")
+        print(f"  Total Size: {stats['total_size_gb']:.2f} GB")
+        print(f"  Completion Rate: {stats['completion_rate']:.1f}%")
+        print(f"  Missing Episodes: {stats['missing_episodes']}")
+        
+        print(f"\n📊 Watch Status:")
+        for status, count in stats['watch_status'].items():
+            if count > 0:
+                print(f"  {status.replace('_', ' ').title()}: {count}")
+        
+        if stats['recently_added']:
+            print(f"\n📅 Recently Added:")
+            for title, date in stats['recently_added'][:3]:
+                print(f"  • {title}")
+        return
+    
+    elif command == 'view':
+        # List all anime in collection
+        print(f"\n📚 Anime Collection ({len(collection_manager_instance.collection)} titles):")
+        for i, (title, entry) in enumerate(sorted(collection_manager_instance.collection.items()), 1):
+            completion = entry.get_completion_percentage()
+            rating_text = f" ⭐{entry.rating}/10" if entry.rating and entry.rating > 0 else ""
+            status_text = f" [{entry.watch_status.value.replace('_', ' ').title()}]" if entry.watch_status != WatchStatus.UNWATCHED else ""
+            print(f"  {i:2d}. {title}{rating_text}{status_text}")
+            print(f"      Episodes: {len(entry.file_paths)}/{entry.total_episodes} ({completion:.1f}%)")
+        return
+    
+    elif command == 'show' and args_list:
+        # Show detailed info for specific anime
+        anime_title = ' '.join(args_list)
+        if anime_title in collection_manager_instance.collection:
+            entry = collection_manager_instance.collection[anime_title]
+            print(f"\n📖 {anime_title}")
+            print(f"  Total Episodes: {entry.total_episodes}")
+            print(f"  Downloaded: {len(entry.file_paths)} episodes")
+            print(f"  Completion: {entry.get_completion_percentage():.1f}%")
+            if entry.rating and entry.rating > 0:
+                print(f"  Rating: {entry.rating}/10")
+            if entry.watch_status != WatchStatus.UNWATCHED:
+                print(f"  Status: {entry.watch_status.value.replace('_', ' ').title()}")
+            if entry.watch_progress > 0:
+                print(f"  Progress: {entry.watch_progress} episodes watched")
+            
+            missing = entry.get_missing_episodes()
+            if missing:
+                print(f"  Missing Episodes: {missing[:10]}" + ("..." if len(missing) > 10 else ""))
+        else:
+            print(f"❌ '{anime_title}' not found in collection")
+        return
+    
+    elif command == 'episodes' and args_list:
+        # Show episode list for specific anime
+        anime_title = ' '.join(args_list)
+        if anime_title in collection_manager_instance.collection:
+            entry = collection_manager_instance.collection[anime_title]
+            print(f"\n📺 Episodes for {anime_title}:")
+            
+            if entry.file_paths:
+                for episode_num in sorted(entry.file_paths.keys()):
+                    file_path = entry.file_paths[episode_num]
+                    file_size = entry.file_sizes.get(episode_num, 0)
+                    size_mb = file_size / (1024 * 1024) if file_size > 0 else 0
+                    size_text = f" ({size_mb:.1f} MB)" if size_mb > 0 else ""
+                    print(f"  Episode {episode_num:02d}: {Path(file_path).name}{size_text}")
+            else:
+                print(f"  No episodes downloaded")
+        else:
+            print(f"❌ '{anime_title}' not found in collection")
+        return
+    
+    elif command == 'search' and args_list:
+        # Search collection by title
+        query = ' '.join(args_list).lower()
+        print(f"\n🔍 Searching for: '{query}'")
+        
+        matches = []
+        for title, entry in collection_manager_instance.collection.items():
+            if query in title.lower():
+                matches.append((title, entry))
+        
+        if matches:
+            print(f"Found {len(matches)} matching anime:")
+            for i, (title, entry) in enumerate(matches, 1):
+                completion = entry.get_completion_percentage()
+                rating_text = f" ⭐{entry.rating}/10" if entry.rating and entry.rating > 0 else ""
+                status_text = f" [{entry.watch_status.value.replace('_', ' ').title()}]" if entry.watch_status != WatchStatus.UNWATCHED else ""
+                print(f"  {i}. {title}{rating_text}{status_text}")
+                print(f"     Episodes: {len(entry.file_paths)}/{entry.total_episodes} ({completion:.1f}%)")
+        else:
+            print("No matches found")
+        return
+    
+    elif command == 'organize':
+        # Organize collection files
+        print(f"\n🗂️ Organizing collection...")
+        organized_count = 0
+        
+        for title, entry in collection_manager_instance.collection.items():
+            for episode_num, file_path in list(entry.file_paths.items()):
+                if os.path.exists(file_path):
+                    try:
+                        new_path = collection_manager_instance.add_episode_file(
+                            title, episode_num, file_path, organize=True
+                        )
+                        if new_path != file_path:
+                            organized_count += 1
+                    except Exception as e:
+                        logger.error(f"Failed to organize {title} episode {episode_num}: {e}")
+        
+        print(f"✅ Organized {organized_count} files")
+        return
+    
+    elif command == 'duplicates':
+        # Find and remove duplicates
+        print(f"\n🔍 Scanning for duplicate files...")
+        duplicates = collection_manager_instance.detect_duplicates()
+        
+        if duplicates:
+            print(f"Found {len(duplicates)} duplicate groups:")
+            for i, (hash_val, paths) in enumerate(duplicates, 1):
+                print(f"  {i}. Hash: {hash_val[:8]}...")
+                for path in paths:
+                    print(f"     {path}")
+            
+            print(f"\n🧹 Cleaning up duplicates...")
+            removed = collection_manager_instance.cleanup_duplicates()
+            print(f"✅ Removed {removed} duplicate files")
+        else:
+            print("✅ No duplicates found")
+        return
+    
+    elif command == 'export' and args_list:
+        # Export collection
+        export_path = ' '.join(args_list)
+        print(f"\n📤 Exporting collection to: {export_path}")
+        
+        try:
+            collection_manager_instance.export_collection(export_path)
+            print(f"✅ Collection exported successfully")
+        except Exception as e:
+            print(f"❌ Export failed: {e}")
+        return
+    
+    elif command == 'import' and args_list:
+        # Import collection
+        import_path = ' '.join(args_list)
+        print(f"\n📥 Importing collection from: {import_path}")
+        
+        try:
+            # This would need to be implemented in CollectionManager
+            print("⚠️ Import functionality not yet implemented")
+        except Exception as e:
+            print(f"❌ Import failed: {e}")
+        return
+    
+    elif command == 'set-episodes' and len(args_list) >= 2:
+        # Manually set episode count for an anime
+        anime_title = ' '.join(args_list[:-1])
+        try:
+            episode_count = int(args_list[-1])
+        except ValueError:
+            print("❌ Episode count must be a number")
+            return
+        
+        if anime_title in collection_manager_instance.collection:
+            entry = collection_manager_instance.collection[anime_title]
+            old_count = entry.total_episodes
+            entry.total_episodes = episode_count
+            collection_manager_instance.save_collection()
+            
+            completion = entry.get_completion_percentage()
+            print(f"\n✅ Updated {anime_title}: {old_count} → {episode_count} episodes")
+            print(f"   Completion: {len(entry.downloaded_episodes)}/{episode_count} ({completion:.1f}%)")
+        else:
+            print(f"❌ '{anime_title}' not found in collection")
+        return
+    
+    elif command == 'data-paths':
+        # Show current data paths and structure
+        from config import get_project_info
+        import json
+        
+        info = get_project_info()
+        print(f"\n📁 AutoPahe Data Structure:")
+        print(f"  Data Directory: {info['data_dir']}")
+        print(f"  Records Database: {info['database_file']}")
+        print(f"  Collection Metadata: {info['collection_file']}")
+        print(f"  Log File: {info['log_file']}")
+        print(f"  Portable Mode: {info['portable_mode']}")
+        
+        print(f"\n📂 Directory Structure:")
+        # Only show subdirectories, not the main data directory itself
+        subdirs = [d for d in info['directories_created'] if d != str(DATA_DIR)]
+        for directory in subdirs:
+            dir_name = directory.split('/')[-1]
+            print(f"  data/{dir_name}/ - {dir_name.title()} files")
+        
+        # Show file sizes and counts
+        import os
+        if os.path.exists(info['database_file']):
+            with open(info['database_file'], 'r') as f:
+                records = json.load(f)
+                print(f"\n📊 Current Data:")
+                print(f"  Anime Records: {len(records)}")
+                print(f"  Database Size: {os.path.getsize(info['database_file']) / 1024:.1f} KB")
+        
+        if os.path.exists(info['collection_file']):
+            with open(info['collection_file'], 'r') as f:
+                collection = json.load(f)
+                print(f"  Collection Entries: {len(collection)}")
+                print(f"  Collection Size: {os.path.getsize(info['collection_file']) / 1024:.1f} KB")
+        return
+    
+    else:
+        print(f"❌ Unknown collection command: {command}")
+        print("Available commands: stats, view, show <title>, episodes <title>, search <query>, organize, duplicates, export <path>, import <path>, set-episodes <title> <count>, data-paths")
+        return
 
 
 # Global collection manager instance

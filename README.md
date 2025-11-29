@@ -16,6 +16,27 @@
 
 A simple yet powerful tool to search, download, and stream your favorite anime episodes. Works on Windows, Mac, and Linux with a beautiful, colorful interface.
 
+## ✨ New in v3.3
+
+### 🗂️ **Centralized Data Architecture**
+- **Unified data directory** - All project data now organized in `data/` folder
+- **Automatic migration** - Seamless upgrade from older versions with zero data loss
+- **Privacy protection** - User data excluded from git, clean project structure
+- **Portable mode** - Support for portable installations via environment variable
+- **Data management** - `--collection data-paths` shows current data structure
+
+### 📚 **Enhanced Collection Management**
+- **Accurate episode tracking** - Fixed 0.0% completion issues with database sync
+- **Manual episode setting** - `--collection set-episodes <title> <count>` command
+- **Smart title matching** - Better sync between collection and records systems
+- **91 anime records** - Consolidated database with comprehensive metadata
+
+### 🛠️ **Code Organization**
+- **Centralized configuration** - `config.py` manages all data paths and migration
+- **Cleaner imports** - Reduced hardcoded paths throughout codebase
+- **Modular architecture** - Clear separation between records and collection systems
+- **Project cleanup** - Removed obsolete files and consolidated management
+
 ## ✨ New in v3.2
 
 ### 🎬 **Cross-Platform Streaming**
@@ -83,6 +104,9 @@ autopahe -s "anime name" -i 0 -md "1-12"
 
 # Download with faster parallel downloads
 autopahe -s "anime name" -i 0 -md "1-12" --workers 3
+
+# Download English dubbed versions (if available)
+autopahe -s "anime name" -i 0 -md "1-12" --dub
 ```
 
 ### 🎬 Stream Anime Episodes (NEW in v3.2)
@@ -99,6 +123,9 @@ autopahe -s "anime name" -i 0 -st "1-3"
 
 # Stream in different quality
 autopahe -s "anime name" -i 0 -st 1 -p 1080
+
+# Stream English dubbed versions (if available)
+autopahe -s "anime name" -i 0 -st 1 --dub
 ```
 
 **Supported Players:**

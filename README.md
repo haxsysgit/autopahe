@@ -16,45 +16,26 @@
 
 A simple yet powerful tool to search, download, and stream your favorite anime episodes. Works on Windows, Mac, and Linux with a beautiful, colorful interface.
 
-## ✨ New in v3.3
+## ✨ New in v3.4
 
-### 🗂️ **Centralized Data Architecture**
-- **Unified data directory** - All project data now organized in `data/` folder
-- **Automatic migration** - Seamless upgrade from older versions with zero data loss
-- **Privacy protection** - User data excluded from git, clean project structure
-- **Portable mode** - Support for portable installations via environment variable
-- **Data management** - `--collection data-paths` shows current data structure
+### 📚 **New Modular Collection System**
+- **Complete collection package** - New `collection/` module with full metadata support
+- **Enhanced AnimeEntry model** - Now includes type, year, genres, synopsis, and ratings
+- **Rich collection commands** - stats, view, show, episodes, search, organize, duplicates, export, import
+- **Watch status tracking** - Track anime as unwatched, watching, completed, on hold, dropped, or plan to watch
+- **Powerful search and filtering** - Find anime by title, type, status, genres, and more
 
-### 📚 **Enhanced Collection Management**
-- **Accurate episode tracking** - Fixed 0.0% completion issues with database sync
-- **Manual episode setting** - `--collection set-episodes <title> <count>` command
-- **Smart title matching** - Better sync between collection and records systems
-- **91 anime records** - Consolidated database with comprehensive metadata
+### 🚀 **Interactive First-Time Setup**
+- **Automatic browser installation** - Prompts to install Playwright browsers on first run
+- **Smart fallback system** - Tries Chrome first, then Chromium if needed
+- **Seamless onboarding** - No more manual setup requirements for new users
+- **Environment control** - Skip auto-install with `AUTOPAHE_SKIP_AUTO_INSTALL` environment variable
 
-### 🛠️ **Code Organization**
-- **Centralized configuration** - `config.py` manages all data paths and migration
-- **Cleaner imports** - Reduced hardcoded paths throughout codebase
-- **Modular architecture** - Clear separation between records and collection systems
-- **Project cleanup** - Removed obsolete files and consolidated management
-
-## ✨ New in v3.2
-
-### 🎬 **Cross-Platform Streaming**
-- **Stream directly** to your favorite media player (VLC, MPV, etc.)
-- **Auto-detects players** on Windows, macOS, and Linux
-- **Smart fallback** - suggests installation if no player found
-- **One-command streaming**: `autopahe -s "anime name" -i 0 -st 1`
-
-### ⚡ **Major Performance Boost**
-- **Instant anime info** - loads cached data in milliseconds
-- **Removed heavy dependencies** - faster startup and smaller footprint
-- **Optimized caching** - smarter memory usage and disk storage
-- **5-10x faster** HTML parsing with native selectors
-
-### 🛠️ **Enhanced Organization**
-- **Fixed duplicate folder creation** - cleaner file management
-- **Streamlined sorting** - `--sort` now handles all organization
-- **Better memory management** - reduced resource usage
+### 🛠️ **Technical Improvements**
+- **Modular architecture** - Replaced old collection_manager.py with new collection/ package
+- **Enhanced data models** - Better type safety and data validation
+- **Improved import/export** - Backup and restore your collection data
+- **Better error handling** - More robust collection management
 
 ## 🎯 What It Does
 
@@ -148,7 +129,7 @@ autopahe -s "anime name" -i 0 -md "1-12" --workers 3
 autopahe -s "anime name" -i 0 -md "1-12" --dub
 ```
 
-### 🎬 Stream Anime Episodes (NEW in v3.2)
+### 🎬 Stream Anime Episodes
 ```bash
 # Stream episode 1 directly (auto-detects player)
 autopahe -s "anime name" -i 0 -st 1

@@ -99,25 +99,16 @@ def install_playwright_browsers():
 
 def _run_interactive_setup():
     """Run setup interactively when browsers are missing on first run."""
-    print("🔧 Installing browser engines...")
+    print("🔧 Installing Playwright browser engine...")
+    print("Note: Playwright installs its own Chromium engine for automation")
+    print("No existing browsers required - this is a standalone engine (~170MB)")
     print("This may take a few minutes...")
     print()
     
     try:
-        # Try Chrome first (preferred)
-        os.environ['AUTOPAHE_BROWSER'] = 'chrome'
-        result = subprocess.run(
-            [sys.executable, '-m', 'playwright', 'install', 'chrome'],
-            capture_output=False,
-            timeout=300
-        )
-        
-        if result.returncode == 0:
-            print("\n✅ Browser engines installed successfully!")
-            return True
-        
-        # Fallback to Chromium
-        print("Chrome not available, trying Chromium...")
+        # Install Chromium engine (smallest, most universal for automation)
+        print("Installing Playwright's Chromium engine...")
+        os.environ['AUTOPAHE_BROWSER'] = 'chromium'
         result = subprocess.run(
             [sys.executable, '-m', 'playwright', 'install', 'chromium'],
             capture_output=False,
@@ -125,8 +116,28 @@ def _run_interactive_setup():
         )
         
         if result.returncode == 0:
-            print("\n✅ Browser engines installed successfully!")
+            print("\n✅ Chromium browser engine installed successfully!")
             return True
+        
+        # If Chromium fails, offer user choice
+        print("\n❌ Could not install Chromium automatically.")
+        print("Please choose a browser to install manually:")
+        print("  firefox    - Install Firefox browser engine")
+        print("  webkit     - Install WebKit browser engine (Safari)")
+        print("  chrome     - Install Chrome browser engine")
+        print("  chromium   - Install Chromium browser engine")
+        print()
+        print("Run one of these commands:")
+        print("  playwright install firefox")
+        print("  playwright install webkit")
+        print("  playwright install chrome")
+        print("  playwright install chromium")
+        print()
+        print("Then set AUTOPAHE_BROWSER environment variable:")
+        print("  export AUTOPAHE_BROWSER=firefox  # Linux/Mac")
+        print("  set AUTOPAHE_BROWSER=firefox     # Windows")
+        print()
+        print("Or use --browser flag: autopahe --browser firefox")
         
         return False
         

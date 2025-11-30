@@ -5,7 +5,7 @@ Manages download state persistence and intelligent resume capabilities.
 Handles interrupted downloads with automatic retry and quality fallback.
 
 Author: AutoPahe Development Team
-Date: 2024-11-22
+Date: 22-11-2025
 """
 
 import json

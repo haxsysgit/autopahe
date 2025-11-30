@@ -98,19 +98,18 @@ playwright install
 **From PyPI:**
 ```bash
 pip install autopahe
-# playwright install  # Optional - auto-installs on first run
+autopahe --setup  # Required first-time setup
 ```
-> 💡 **Windows Note**: The `playwright install` step is optional since browsers auto-install on first run. Run it manually only for faster first-time setup.
 
-#### 🔧 **Automatic Browser Setup**
-- **Auto-install**: Playwright browsers install automatically on first run
-- **Requirements**: ~500MB disk space and internet connection
-- **Cross-platform**: Works on Windows, macOS, and Linux
+### 🔧 First-Time Setup (Required)
 
-#### ⚙️ **Advanced Options**
-- **Skip auto-install**: Set `AUTOPAHE_SKIP_AUTO_INSTALL=1` for manual control
-- **Restricted environments**: Use manual setup if auto-install fails
-- **System dependencies**: May require sudo on Linux for `--with-deps` flag
+After installation, run the setup command once to install browser engines:
+
+```bash
+autopahe --setup
+```
+
+This installs Playwright browsers (~500MB) needed for bypassing DDoS protection. You only need to do this once.
 
 ### Basic Usage
 ```bash

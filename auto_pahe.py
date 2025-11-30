@@ -56,7 +56,7 @@ from ap_core.browser import driver_output, cleanup_browsers, get_request_session
 from ap_core.cache import cache_get, cache_set, cache_clear, display_cache_stats, get_cache_stats
 from ap_core.fuzzy_search import fuzzy_search_anime, fuzzy_engine
 from ap_core.resume_manager import resume_manager
-from features.collection_manager import collection_manager, WatchStatus, handle_collection_commands
+from collection import get_collection_manager, handle_collection_command, WatchStatus
 from ap_core.notifications import notify_download_complete, notify_download_failed
 # Cookie clearing functionality removed - handled by Playwright context
 from ap_core.config import load_app_config, write_sample_config
@@ -172,18 +172,33 @@ def setup_environment():
         print(f"✓ Sample config written to: {default_path}")
     except Exception as e:
         print(f"Config setup skipped: {e}")
+    
+    # Run the comprehensive installer
     try:
-        os.environ['AUTOPAHE_BROWSER'] = 'chrome'
-    except Exception:
-        pass
-    try:
-        # Prefer Chrome CfT to match default; fallback to Chromium
-        rc = subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chrome'], check=False)
-        if getattr(rc, 'returncode', 1) != 0:
-            subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chromium'], check=False)
-    except Exception:
-        print("Playwright not available; skipping browser install.")
-    print("Setup complete.")
+        print("🔧 Running comprehensive setup...")
+        # Import and run the install script
+        import subprocess
+        import sys
+        
+        install_script = Path(__file__).parent / "install.py"
+        if install_script.exists():
+            result = subprocess.run([sys.executable, str(install_script)])
+            if result.returncode == 0:
+                print("✅ Setup completed successfully!")
+            else:
+                print("❌ Setup failed. Please check the error messages above.")
+                return False
+        else:
+            print("⚠️  install.py not found, falling back to basic setup...")
+            # Fallback to basic Playwright install
+            os.environ['AUTOPAHE_BROWSER'] = 'chrome'
+            rc = subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chrome'], check=False)
+            if getattr(rc, 'returncode', 1) != 0:
+                subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chromium'], check=False)
+    except Exception as e:
+        print(f"❌ Setup failed: {e}")
+        return False
+    
     return True
 
 def get_performance_stats():
@@ -722,9 +737,10 @@ def download(arg=1, download_file=True, res = "720", prefer_dub=False):
             resume_manager.mark_completed(download_id)
             
             # Add to collection manager (without organizing - --sort handles that)
-            entry = collection_manager.add_anime(animepicked)
+            cm = get_collection_manager()
+            entry = cm.add_anime(animepicked)
             episode_file = str(DOWNLOADS / f"{animepicked}_Episode_{arg}.mp4")
-            collection_manager.add_episode_file(animepicked, arg, episode_file, organize=False)
+            cm.add_episode_file(animepicked, arg, episode_file, organize=False)
             Banners.success_message(f"Added episode {arg} to collection for '{animepicked}'")
         else:
             # Mark download as failed in resume manager
@@ -1229,7 +1245,7 @@ def command_main(args):
     
     # Handle Collection Manager commands
     if collection_cmd is not None:
-        handle_collection_commands(collection_cmd, collection_manager)
+        handle_collection_command(collection_cmd, get_collection_manager())
         return
     
     # Handle watch status updates
@@ -1247,7 +1263,7 @@ def command_main(args):
                 }
                 status = status_map.get(watch_status)
                 if status:
-                    collection_manager.update_watch_status(anime_title, status, watch_progress)
+                    get_collection_manager().update_watch_status(anime_title, status, watch_progress)
                     print(f"✅ Updated watch status for '{anime_title}': {watch_status}")
                     if watch_progress:
                         print(f"   Progress: {watch_progress} episodes watched")
@@ -1258,10 +1274,10 @@ def command_main(args):
         if search_response_dict and 'data' in search_response_dict:
             anime_title = search_response_dict['data'][iarg].get('title')
             if anime_title:
-                if anime_title in collection_manager.collection:
-                    entry = collection_manager.collection[anime_title]
-                    entry.rating = rating
-                    collection_manager.save_collection()
+                cm = get_collection_manager()
+                entry = cm.get_anime(anime_title)
+                if entry:
+                    cm.set_rating(anime_title, rating)
                     print(f"⭐ Rated '{anime_title}': {rating}/10")
                 else:
                     print(f"⚠️ '{anime_title}' not in collection. Download some episodes first.")

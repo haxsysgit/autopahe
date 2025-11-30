@@ -2,7 +2,7 @@
 
 > **Complete command reference and advanced features for power users**
 
-This comprehensive guide covers all features, configuration options, and detailed command usage for AutoPahe v3.3.2+. Learn to master search, download, streaming, record management, and advanced automation features.
+This comprehensive guide covers all features, configuration options, and detailed command usage for AutoPahe v3.4.0+. Learn to master search, download, streaming, record management, and advanced automation features.
 
 ## 📋 Table of Contents
 
@@ -21,7 +21,26 @@ This comprehensive guide covers all features, configuration options, and detaile
 
 ---
 
+<a id="quick-start"></a>
+
 ## 🚀 Quick Start
+
+### First-Time Setup (Required)
+
+Before using AutoPahe for the first time, run the setup command to install browser engines:
+
+```bash
+autopahe --setup
+```
+
+This installs Playwright browser engines (~500MB) required for bypassing DDoS protection. **You only need to run this once.**
+
+```
+🔧 Running comprehensive setup...
+✓ Sample config written to: ~/.config/autopahe/config.ini
+Installing Chrome browser...
+✅ Setup completed successfully!
+```
 
 ### Basic Download Workflow
 ```bash
@@ -45,6 +64,8 @@ Found 3 results. Use -i <index> to select.
 ```
 
 ---
+
+<a id="search--discovery"></a>
 
 ## 🔍 Search & Discovery
 
@@ -102,6 +123,8 @@ autopahe -s "Naruto Shippuden" --no-fuzzy
 ```
 
 ---
+
+<a id="download-operations"></a>
 
 ## ⬇️ Download Operations
 
@@ -286,6 +309,8 @@ autopahe --resume
 
 ---
 
+<a id="streaming-features"></a>
+
 ## 📺 Streaming Features
 
 ### Streaming Commands
@@ -363,6 +388,8 @@ autopahe -s "Demon Slayer" -i 0 -st 1 -p 1080 --player vlc
 ```
 
 ---
+
+<a id="record-management"></a>
 
 ## 📊 Record Management
 
@@ -533,6 +560,8 @@ autopahe -R import my_anime_backup.json
 ```
 
 ---
+
+<a id="collection-management"></a>
 
 ## 🗂️ Collection Management
 
@@ -810,6 +839,8 @@ Total space that could be freed: 1.6GB
 
 ---
 
+<a id="file-organization"></a>
+
 ## 📁 File Organization
 
 ### Sorting Commands
@@ -949,6 +980,8 @@ Step 3: Moving files to folders...
 
 ---
 
+<a id="cache--performance"></a>
+
 ## 💾 Cache & Performance
 
 ### Cache Commands
@@ -1052,6 +1085,8 @@ autopahe -s "Anime" -i 0 -md "1-10" --verbose
 ```
 
 ---
+
+<a id="notifications--monitoring"></a>
 
 ## 🔔 Notifications & Monitoring
 
@@ -1216,6 +1251,8 @@ Collection Status:
 
 ---
 
+<a id="configuration-system"></a>
+
 ## ⚙️ Configuration System
 
 ### Configuration Commands
@@ -1351,6 +1388,8 @@ autopahe -s "Anime" -i 0 -d 1
 ```
 
 ---
+
+<a id="advanced-workflows"></a>
 
 ## 🔄 Advanced Workflows
 
@@ -1500,6 +1539,8 @@ autopahe --collection export ~/backups/collection_monthly_$(date +%Y%m%d).json
 
 ---
 
+<a id="troubleshooting"></a>
+
 ## 🛠️ Troubleshooting
 
 ### Common Issues and Solutions
@@ -1633,6 +1674,8 @@ brew install vlc
 
 ---
 
+<a id="getting-help"></a>
+
 ## 📞 Getting Help
 
 ### Support Resources
@@ -1659,6 +1702,8 @@ Request features via:
 - Direct contributions via Pull Requests
 
 ---
+
+<a id="pro-tips"></a>
 
 ## 🎓 Pro Tips
 
@@ -1701,4 +1746,4 @@ autopahe --collection export ~/backups/collection_$DATE.json
 
 **Master AutoPahe with these comprehensive features! 🚀**
 
-*AutoPahe v3.3.2+ - Cross-platform anime automation at its finest.*
+*AutoPahe v3.3.4+ - Cross-platform anime automation at its finest.*

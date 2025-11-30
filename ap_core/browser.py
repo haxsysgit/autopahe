@@ -97,6 +97,47 @@ def install_playwright_browsers():
         return False
 
 
+def _run_interactive_setup():
+    """Run setup interactively when browsers are missing on first run."""
+    print("🔧 Installing browser engines...")
+    print("This may take a few minutes...")
+    print()
+    
+    try:
+        # Try Chrome first (preferred)
+        os.environ['AUTOPAHE_BROWSER'] = 'chrome'
+        result = subprocess.run(
+            [sys.executable, '-m', 'playwright', 'install', 'chrome'],
+            capture_output=False,
+            timeout=300
+        )
+        
+        if result.returncode == 0:
+            print("\n✅ Browser engines installed successfully!")
+            return True
+        
+        # Fallback to Chromium
+        print("Chrome not available, trying Chromium...")
+        result = subprocess.run(
+            [sys.executable, '-m', 'playwright', 'install', 'chromium'],
+            capture_output=False,
+            timeout=300
+        )
+        
+        if result.returncode == 0:
+            print("\n✅ Browser engines installed successfully!")
+            return True
+        
+        return False
+        
+    except subprocess.TimeoutExpired:
+        print("\n❌ Installation timed out.")
+        return False
+    except Exception as e:
+        print(f"\n❌ Installation failed: {e}")
+        return False
+
+
 def get_pw_context(browser_choice: str = None, headless: bool = True):
     """Return a shared Playwright persistent context (single OS window).
 
@@ -115,7 +156,7 @@ def get_pw_context(browser_choice: str = None, headless: bool = True):
             print("❌ Playwright not found. Please install dependencies first:")
             print("   Option 1: uv sync && uv run playwright install")
             print("   Option 2: pip install -r requirements.txt && playwright install")
-            print("   Option 3: Use 'uv run autopahe' for automatic setup")
+            print("   Option 3: Run 'autopahe --setup' for automatic setup")
             return None
         
         _pw = sync_playwright().start()
@@ -149,36 +190,59 @@ def get_pw_context(browser_choice: str = None, headless: bool = True):
                 print("\n" + "="*60)
                 print("🔍 SETUP REQUIRED: Playwright browsers not installed")
                 print("="*60)
-                print("This appears to be your first time running autopahe.")
-                print("The required browser engines need to be installed.\n")
                 
-                # Try auto-install
-                if install_playwright_browsers():
-                    print("🔄 Retrying browser launch...")
-                    # Retry the browser launch after installation
+                # Check if running interactively
+                import sys
+                if sys.stdin.isatty():
+                    # Interactive mode - prompt user
+                    print("Browser engines (~500MB) are required for AutoPahe to work.")
+                    print()
                     try:
-                        if choice == "firefox":
-                            _pw_context = _pw.firefox.launch_persistent_context(user_data_dir, headless=headless)
-                        elif choice == "chrome":
-                            try:
-                                _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, channel="chrome", headless=headless)
-                            except Exception:
-                                _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, headless=headless)
-                        elif choice == "msedge":
-                            try:
-                                _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, channel="msedge", headless=headless)
-                            except Exception:
-                                _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, headless=headless)
+                        response = input("Would you like to install them now? [Y/n]: ").strip().lower()
+                        if response in ('', 'y', 'yes'):
+                            print()
+                            # Run setup
+                            if _run_interactive_setup():
+                                print("\n🔄 Retrying browser launch...")
+                                # Retry the browser launch
+                                try:
+                                    if choice == "firefox":
+                                        _pw_context = _pw.firefox.launch_persistent_context(user_data_dir, headless=headless)
+                                    elif choice == "chrome":
+                                        try:
+                                            _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, channel="chrome", headless=headless)
+                                        except Exception:
+                                            _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, headless=headless)
+                                    elif choice == "msedge":
+                                        try:
+                                            _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, channel="msedge", headless=headless)
+                                        except Exception:
+                                            _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, headless=headless)
+                                    else:
+                                        _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, headless=headless)
+                                    print("✅ Browser launched successfully!")
+                                    return _pw_context
+                                except Exception as retry_error:
+                                    print(f"❌ Browser still failed after setup: {retry_error}")
+                                    return None
+                            else:
+                                print("❌ Setup failed. Please try running: autopahe --setup")
+                                return None
                         else:
-                            _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, headless=headless)
-                        print("✅ Browser launched successfully!")
-                        return _pw_context
-                    except Exception as retry_error:
-                        print(f"❌ Browser still failed to launch after installation: {retry_error}")
-                        print_manual_instructions()
+                            print("\nYou can run setup later with: autopahe --setup")
+                            return None
+                    except (EOFError, KeyboardInterrupt):
+                        print("\n\nSetup cancelled. Run 'autopahe --setup' when ready.")
                         return None
                 else:
-                    print_manual_instructions()
+                    # Non-interactive mode - show instructions
+                    print("Please run the setup command to install required browsers:")
+                    print()
+                    print("   autopahe --setup")
+                    print()
+                    print("This will install all dependencies and browser engines.")
+                    print("After setup completes, run autopahe again.")
+                    print("="*60)
                     return None
             else:
                 # Different type of error

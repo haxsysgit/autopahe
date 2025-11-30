@@ -2,6 +2,8 @@ import os
 import logging
 import requests
 import json as jsonlib
+import subprocess
+import sys
 from pathlib import Path
  
 from ap_core.parser import parse_mailfunction_api
@@ -35,6 +37,66 @@ _pw = None
 _pw_context = None
 _driver_cache = {}
 
+def install_playwright_browsers():
+    """Install Playwright browsers automatically."""
+    # Check if auto-install is disabled
+    if os.environ.get("AUTOPAHE_SKIP_AUTO_INSTALL", "").lower() in ("1", "true", "yes"):
+        print("⚠️  Auto-install disabled via AUTOPAHE_SKIP_AUTO_INSTALL")
+        return False
+        
+    print("🔧 Playwright browsers not found. Installing automatically...")
+    print("This may take a few minutes on first run...")
+    
+    try:
+        # Check available disk space (need ~500MB for browsers)
+        try:
+            home_dir = Path.home()
+            if hasattr(os, 'statvfs'):  # Unix-like systems
+                stat = os.statvfs(home_dir)
+                free_space_mb = (stat.f_bavail * stat.f_frsize) // (1024 * 1024)
+            else:  # Windows
+                import shutil
+                free_space_mb = shutil.disk_usage(home_dir).free // (1024 * 1024)
+            
+            if free_space_mb < 500:
+                print(f"❌ Insufficient disk space: {free_space_mb}MB available, need ~500MB")
+                return False
+        except Exception as space_error:
+            # If we can't check disk space, continue anyway and let the install fail if needed
+            logging.warning(f"Could not check disk space: {space_error}")
+            
+        # Try to install browsers using the same Python executable
+        result = subprocess.run([
+            sys.executable, "-m", "playwright", "install", "--with-deps"
+        ], capture_output=True, text=True, timeout=300)
+        
+        if result.returncode == 0:
+            print("✅ Playwright browsers installed successfully!")
+            return True
+        else:
+            error_msg = result.stderr.lower()
+            if "permission" in error_msg or "access denied" in error_msg:
+                print("❌ Permission denied during installation.")
+                print("   Try running with appropriate privileges or check install directory permissions.")
+            elif "network" in error_msg or "connection" in error_msg:
+                print("❌ Network connection failed during installation.")
+                print("   Check your internet connection and try again.")
+            else:
+                print(f"❌ Failed to install Playwright browsers: {result.stderr}")
+            return False
+            
+    except subprocess.TimeoutExpired:
+        print("❌ Installation timed out. Please run 'playwright install' manually.")
+        return False
+    except PermissionError:
+        print("❌ Permission denied during installation.")
+        print("   Try running with appropriate privileges or check install directory permissions.")
+        return False
+    except Exception as e:
+        print(f"❌ Failed to install Playwright browsers: {e}")
+        return False
+
+
 def get_pw_context(browser_choice: str = None, headless: bool = True):
     """Return a shared Playwright persistent context (single OS window).
 
@@ -50,31 +112,110 @@ def get_pw_context(browser_choice: str = None, headless: bool = True):
             from playwright.sync_api import sync_playwright
         except ModuleNotFoundError:
             logging.error("Playwright is not installed in this environment. Run: 'uv sync' then 'uv run playwright install' or invoke the app with 'uv run autopahe ...'.")
+            print("❌ Playwright not found. Please install dependencies first:")
+            print("   Option 1: uv sync && uv run playwright install")
+            print("   Option 2: pip install -r requirements.txt && playwright install")
+            print("   Option 3: Use 'uv run autopahe' for automatic setup")
             return None
+        
         _pw = sync_playwright().start()
         choice = (browser_choice or os.environ.get("AUTOPAHE_BROWSER") or "chrome").lower()
         # Normalize edge alias
         if choice == "edge":
             choice = "msedge"
         user_data_dir = str(Path.home() / ".cache" / "autopahe-pw" / choice)
-        if choice == "firefox":
-            _pw_context = _pw.firefox.launch_persistent_context(user_data_dir, headless=headless)
-        elif choice == "chrome":
-            try:
-                _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, channel="chrome", headless=headless)
-            except Exception:
+        
+        try:
+            if choice == "firefox":
+                _pw_context = _pw.firefox.launch_persistent_context(user_data_dir, headless=headless)
+            elif choice == "chrome":
+                try:
+                    _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, channel="chrome", headless=headless)
+                except Exception:
+                    _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, headless=headless)
+            elif choice == "msedge":
+                try:
+                    _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, channel="msedge", headless=headless)
+                except Exception:
+                    _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, headless=headless)
+            else:
                 _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, headless=headless)
-        elif choice == "msedge":
-            try:
-                _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, channel="msedge", headless=headless)
-            except Exception:
-                _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, headless=headless)
-        else:
-            _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, headless=headless)
-        return _pw_context
+            return _pw_context
+            
+        except Exception as e:
+            # Check if this is a missing browser executable error
+            error_str = str(e).lower()
+            if "executable doesn't exist" in error_str or "playwright install" in error_str:
+                print("\n" + "="*60)
+                print("🔍 SETUP REQUIRED: Playwright browsers not installed")
+                print("="*60)
+                print("This appears to be your first time running autopahe.")
+                print("The required browser engines need to be installed.\n")
+                
+                # Try auto-install
+                if install_playwright_browsers():
+                    print("🔄 Retrying browser launch...")
+                    # Retry the browser launch after installation
+                    try:
+                        if choice == "firefox":
+                            _pw_context = _pw.firefox.launch_persistent_context(user_data_dir, headless=headless)
+                        elif choice == "chrome":
+                            try:
+                                _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, channel="chrome", headless=headless)
+                            except Exception:
+                                _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, headless=headless)
+                        elif choice == "msedge":
+                            try:
+                                _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, channel="msedge", headless=headless)
+                            except Exception:
+                                _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, headless=headless)
+                        else:
+                            _pw_context = _pw.chromium.launch_persistent_context(user_data_dir, headless=headless)
+                        print("✅ Browser launched successfully!")
+                        return _pw_context
+                    except Exception as retry_error:
+                        print(f"❌ Browser still failed to launch after installation: {retry_error}")
+                        print_manual_instructions()
+                        return None
+                else:
+                    print_manual_instructions()
+                    return None
+            else:
+                # Different type of error
+                logging.error(f"Failed to start Playwright context: {e}")
+                print(f"❌ Browser error: {e}")
+                return None
+                
     except Exception as e:
-        logging.error(f"Failed to start Playwright context: {e}")
+        logging.error(f"Unexpected error in Playwright setup: {e}")
+        print(f"❌ Setup error: {e}")
         return None
+
+
+def print_manual_instructions():
+    """Print manual setup instructions when auto-install fails."""
+    print("\n📋 MANUAL SETUP INSTRUCTIONS:")
+    print("-" * 40)
+    print("Please run one of these commands in your terminal:")
+    print()
+    print("🔹 Option 1 - Using UV (recommended):")
+    print("   uv sync")
+    print("   uv run playwright install")
+    print()
+    print("🔹 Option 2 - Using pip:")
+    print("   pip install -r requirements.txt")
+    print("   playwright install")
+    print()
+    print("🔹 Option 3 - Direct playwright install:")
+    print("   python -m playwright install")
+    print()
+    print("💡 TIPS:")
+    print("   • If you're in a restricted environment, set AUTOPAHE_SKIP_AUTO_INSTALL=1")
+    print("   • Installation requires ~500MB disk space and internet connection")
+    print("   • Use --with-deps flag if system dependencies are missing")
+    print()
+    print("After installation, run autopahe again.")
+    print("-" * 40)
 
 
 def close_pw_context():

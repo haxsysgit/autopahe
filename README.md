@@ -68,9 +68,49 @@ A simple yet powerful tool to search, download, and stream your favorite anime e
 ## 🚀 Quick Start
 
 ### Installation
+
+#### 🚀 **Easiest Setup (Recommended)**
+```bash
+# Clone and run our automated installer
+git clone https://github.com/haxsysgit/autopahe.git
+cd autopahe
+python install.py
+```
+
+#### 📦 **Alternative Methods**
+
+**Using UV (fastest):**
+```bash
+git clone https://github.com/haxsysgit/autopahe.git
+cd autopahe
+uv sync
+uv run playwright install
+```
+
+**Using pip:**
+```bash
+git clone https://github.com/haxsysgit/autopahe.git
+cd autopahe
+pip install -r requirements.txt
+playwright install
+```
+
+**From PyPI:**
 ```bash
 pip install autopahe
+# playwright install  # Optional - auto-installs on first run
 ```
+> 💡 **Windows Note**: The `playwright install` step is optional since browsers auto-install on first run. Run it manually only for faster first-time setup.
+
+#### 🔧 **Automatic Browser Setup**
+- **Auto-install**: Playwright browsers install automatically on first run
+- **Requirements**: ~500MB disk space and internet connection
+- **Cross-platform**: Works on Windows, macOS, and Linux
+
+#### ⚙️ **Advanced Options**
+- **Skip auto-install**: Set `AUTOPAHE_SKIP_AUTO_INSTALL=1` for manual control
+- **Restricted environments**: Use manual setup if auto-install fails
+- **System dependencies**: May require sudo on Linux for `--with-deps` flag
 
 ### Basic Usage
 ```bash

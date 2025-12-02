@@ -120,6 +120,111 @@ def get_anime_cache_key(session_id):
     """Generate cache key for anime-specific data"""
     return f"anime_complete_{session_id}"
 
+
+def fetch_episode_page(session_id, page_num=1, use_cache=True):
+    """Fetch a specific page of episodes for an anime.
+    
+    Args:
+        session_id: The anime session ID
+        page_num: Page number to fetch (1-indexed)
+        use_cache: Whether to use cached data if available
+        
+    Returns:
+        dict: Episode data for the requested page
+    """
+    base_url = f'https://animepahe.com/api?m=release&id={session_id}&sort=episode_asc'
+    page_url = f"{base_url}&page={page_num}"
+    
+    # Check memory cache first
+    if use_cache and page_url in _episode_cache:
+        logging.debug(f"✓ Loaded page {page_num} from memory cache")
+        return _episode_cache[page_url]
+    
+    # Check disk cache
+    if use_cache:
+        cached = cache_get(page_url, max_age_hours=24)
+        if cached:
+            try:
+                page_data = json.loads(cached.decode()) if isinstance(cached, bytes) else cached
+                _episode_cache[page_url] = page_data
+                logging.debug(f"✓ Loaded page {page_num} from disk cache")
+                return page_data
+            except Exception as e:
+                logging.debug(f"Failed to parse cached page data: {e}")
+    
+    # Fetch the page
+    try:
+        session = get_request_session()
+        response = session.get(page_url, timeout=10)
+        if response.status_code == 200:
+            page_data = response.json()
+            _episode_cache[page_url] = page_data
+            cache_set(page_url, json.dumps(page_data).encode())
+            logging.debug(f"✓ Fetched page {page_num} via HTTP")
+            return page_data
+    except Exception as e:
+        logging.warning(f"HTTP request failed: {e}")
+        # Fall back to Playwright
+        page_data = driver_output(page_url, driver=True, json=True, wait_time=5)
+        if page_data:
+            _episode_cache[page_url] = page_data
+            cache_set(page_url, json.dumps(page_data).encode())
+            return page_data
+    
+    return None
+
+
+def get_episode_session(session_id, episode_num, use_cache=True):
+    """Get the session ID for a specific episode number (handles pagination).
+    
+    This function lazily fetches only the page needed for the requested episode.
+    
+    Args:
+        session_id: The anime session ID
+        episode_num: The episode number (1-indexed)
+        use_cache: Whether to use cached data
+        
+    Returns:
+        tuple: (episode_session, episode_data) or (None, None) if not found
+    """
+    # First, get page 1 to understand pagination
+    first_page = fetch_episode_page(session_id, page_num=1, use_cache=use_cache)
+    if not first_page:
+        return None, None
+    
+    per_page = first_page.get('per_page', 30)
+    total = first_page.get('total', 0)
+    last_page = first_page.get('last_page', 1)
+    
+    # Check if episode is within valid range
+    if episode_num < 1 or episode_num > total:
+        logging.error(f"Episode {episode_num} out of range (1-{total})")
+        return None, None
+    
+    # Calculate which page this episode is on
+    # Episodes are sorted ascending, so episode 1-30 on page 1, 31-60 on page 2, etc.
+    page_num = ((episode_num - 1) // per_page) + 1
+    
+    # Calculate index within the page
+    index_in_page = (episode_num - 1) % per_page
+    
+    # Fetch the appropriate page
+    if page_num == 1:
+        page_data = first_page
+    else:
+        logging.debug(f"Episode {episode_num} is on page {page_num}, fetching...")
+        page_data = fetch_episode_page(session_id, page_num=page_num, use_cache=use_cache)
+        if not page_data:
+            return None, None
+    
+    # Get the episode from the page
+    episodes = page_data.get('data', [])
+    if index_in_page < len(episodes):
+        episode = episodes[index_in_page]
+        return episode.get('session'), episode
+    
+    return None, None
+
 def cache_anime_data(session_id, episode_data, play_links_data):
     """Cache complete anime data for instant future access"""
     cache_key = get_anime_cache_key(session_id)
@@ -463,48 +568,8 @@ def index(arg):
         session_id = anime_data['session']
         episode_page_format = f'https://animepahe.com/anime/{session_id}'
         
-        # Get episode list
-        anime_url_format = f'https://animepahe.com/api?m=release&id={session_id}&sort=episode_asc&page=1'
-        
-        # Check in-memory cache first (fastest)
-        if anime_url_format in _episode_cache:
-            jsonpage_dict = _episode_cache[anime_url_format]
-            logging.debug("✓ Loaded episode list from memory cache")
-        else:
-            # Initialize jsonpage_dict to avoid undefined error
-            jsonpage_dict = None
-            
-            # Try disk cache next
-            cached = cache_get(anime_url_format, max_age_hours=24)  # 24 hours for episode data
-            if cached:
-                try:
-                    # Parse cached JSON data
-                    jsonpage_dict = json.loads(cached.decode()) if isinstance(cached, bytes) else cached
-                    logging.debug("✓ Loaded episode list from disk cache")
-                    # Store in memory cache for even faster access
-                    _episode_cache[anime_url_format] = jsonpage_dict
-                except Exception as e:
-                    logging.debug(f"Failed to parse cached episode data: {e}")
-            else:
-                # Try direct HTTP request first (faster, no browser)
-                try:
-                    session = get_request_session()
-                    response = session.get(anime_url_format, timeout=10)
-                    if response.status_code == 200:
-                        jsonpage_dict = response.json()
-                        logging.debug("Successfully fetched episode list via HTTP")
-                        # Cache the result
-                        _episode_cache[anime_url_format] = jsonpage_dict
-                        cache_set(anime_url_format, json.dumps(jsonpage_dict).encode())
-                except Exception as e:
-                    logging.warning(f"HTTP request failed: {e}")
-                    # Fall back to Playwright if HTTP fails
-                    logging.info("Falling back to Playwright for episode list...")
-                    jsonpage_dict = driver_output(anime_url_format, driver=True, json=True, wait_time=5)
-                    if jsonpage_dict:
-                        # Cache the result even from Playwright
-                        _episode_cache[anime_url_format] = jsonpage_dict
-                        cache_set(anime_url_format, json.dumps(jsonpage_dict).encode())
+        # Fetch first page of episodes (for display). Additional pages fetched lazily on demand.
+        jsonpage_dict = fetch_episode_page(session_id, page_num=1, use_cache=True)
         
         if not jsonpage_dict or 'data' not in jsonpage_dict:
             logging.error("Failed to fetch episode list. The server may be down or rate limiting requests.")
@@ -593,8 +658,18 @@ def download(arg=1, download_file=True, res = "720", prefer_dub=False):
         # Convert the argument to an integer to ensure it is in the correct format
         arg = int(arg)
 
-        # Retrieve the session ID for the selected episode from the global jsonpage_dict
-        episode_session = jsonpage_dict['data'][arg - 1]['session']
+        # Check if anime is selected
+        if not session_id:
+            logging.error("No anime selected. Please select an anime first.")
+            return
+        
+        # Get episode session using lazy loading (fetches correct page on demand)
+        episode_session, episode_data = get_episode_session(session_id, arg)
+        if not episode_session:
+            # get_episode_session already logs the error with total count
+            total = jsonpage_dict.get('total', 'unknown') if jsonpage_dict else 'unknown'
+            print(f"\n❌ Episode {arg} not found. This anime has {total} episodes available.")
+            return
 
         # Construct the URL for the stream page for the specific episode using the session ID
         stream_page_url = f'https://animepahe.com/play/{session_id}/{episode_session}'
@@ -763,8 +838,17 @@ def stream_episode(arg=1, player="default", res="720", prefer_dub=False):
         # Convert the argument to an integer to ensure it is in the correct format
         arg = int(arg)
 
-        # Retrieve the session ID for the selected episode from the global jsonpage_dict
-        episode_session = jsonpage_dict['data'][arg - 1]['session']
+        # Check if anime is selected
+        if not session_id:
+            logging.error("No anime selected. Please select an anime first.")
+            return False
+        
+        # Get episode session using lazy loading (fetches correct page on demand)
+        episode_session, episode_data = get_episode_session(session_id, arg)
+        if not episode_session:
+            total = jsonpage_dict.get('total', 'unknown') if jsonpage_dict else 'unknown'
+            print(f"\n❌ Episode {arg} not found. This anime has {total} episodes available.")
+            return False
         
         # Check if we have cached play page data for this anime
         cached_anime = get_cached_anime_data(anime_id)

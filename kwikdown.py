@@ -6,6 +6,7 @@ import shutil                  # For file system operations and player detection
 import tqdm                    # For progress bar during file download
 import time                    # For delay/retries
 import logging                 # For debug logging
+import re                      # For building safe filenames
 from pathlib import Path
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -25,6 +26,37 @@ def setup_session(retries=5):
     session.mount("http://", adapter)
     session.mount("https://", adapter)
     return session
+
+
+def _build_safe_filename(animename, ep=None, quality=None):
+    """Build a filesystem-safe filename like '22-Eighty-Six-720p.mp4'.
+
+    This is based on the display name (animename), episode number, and quality
+    so it stays stable regardless of whatever name the server suggests.
+    """
+    base = (animename or "Anime").strip()
+    # Replace any non-alphanumeric sequence with a single dash
+    slug = re.sub(r"[^0-9A-Za-z]+", "-", base).strip("-")
+    slug = re.sub(r"-+", "-", slug) or "Anime"
+
+    if ep is not None:
+        try:
+            episode_str = str(int(ep)).zfill(2)
+        except Exception:
+            episode_str = "00"
+    else:
+        episode_str = "00"
+
+    quality_str = "Unknown"
+    if quality:
+        q = str(quality).strip()
+        if q.isdigit():
+            quality_str = f"{q}p"
+        else:
+            quality_str = q
+
+    return f"{episode_str}-{slug}-{quality_str}.mp4"
+
 
 def download_with_retries(session, posturl, params, headers, filename, ep, chunk_size=1024 * 300, retries=5):
     for attempt in range(1, retries + 1):
@@ -53,13 +85,6 @@ def download_with_retries(session, posturl, params, headers, filename, ep, chunk
                 print(f"  Post URL: {posturl}")
                 return
 
-            # Extract filename (prefer server-provided name)
-            content_disposition = response.headers.get("content-disposition", "")
-            if "filename=" in content_disposition:
-                filename = content_disposition.split("filename=")[-1].strip('"')
-            if not filename:
-                filename = "video.mp4"
-
             # Total size = server content + local file (for resume)
             total_size = int(response.headers.get("content-length", 0)) + file_size
             mode = "ab" if file_size else "wb"
@@ -83,7 +108,8 @@ def download_with_retries(session, posturl, params, headers, filename, ep, chunk
                 print("Download failed after all retries.")
                 return
 
-def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 300, ep=None, animename=None):
+
+def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 300, ep=None, animename=None, quality=None):
     os.chdir(dpath)
 
     # Handle pahe.win redirect pages
@@ -237,8 +263,14 @@ def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 30
     # Token included in form body
     params = {"_token": token}
 
+    # Build a stable, display-name-based filename
+    if animename:
+        target_filename = _build_safe_filename(animename, ep=ep, quality=quality)
+    else:
+        target_filename = "video.mp4"
+
     # Call the actual download function
-    download_with_retries(session, posturl, params, headers, animename, ep, chunk_size)
+    download_with_retries(session, posturl, params, headers, target_filename, ep, chunk_size)
 
 
 def kwik_stream(url, browser="chrome", ep=None, animename=None):

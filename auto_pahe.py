@@ -12,6 +12,7 @@ import subprocess
 from pathlib import Path
 import json
 import re
+import shlex
 
 # Third-party imports
 import requests
@@ -59,10 +60,10 @@ from ap_core.resume_manager import resume_manager
 from collection import get_collection_manager, handle_collection_command, WatchStatus
 from ap_core.notifications import notify_download_complete, notify_download_failed
 # Cookie clearing functionality removed - handled by Playwright context
-from ap_core.config import load_app_config, write_sample_config
+from ap_core.config import load_app_config, write_sample_config, sample_config_text
 
 # Local imports - Features
-from kwikdown import kwik_download, kwik_stream, detect_available_player, stream_video
+from kwikdown import kwik_download, kwik_stream, detect_available_player, stream_video, _build_safe_filename
 from features.manager import (
     process_record,
     load_database,
@@ -794,17 +795,21 @@ def download(arg=1, download_file=True, res = "720", prefer_dub=False):
         # Show download progress using structured design
         Banners.download_progress(animepicked, arg)
 
+        # Build a stable filename based on display title, episode and quality
+        safe_name = _build_safe_filename(animepicked, ep=arg, quality=res)
+        episode_path = DOWNLOADS / safe_name
+
         # Add download to resume manager for tracking
         download_id = resume_manager.add_download(
             anime_title=animepicked,
             episode_number=str(arg),
             download_url=kwik,
-            file_path=str(DOWNLOADS / f"{animepicked}_Episode_{arg}.mp4"),
+            file_path=str(episode_path),
             quality=res
         )
 
         # Trigger the download process using the kwik link and specify the download directory
-        result = kwik_download(url=kwik, dpath=DOWNLOADS, ep=arg, animename=animepicked)
+        result = kwik_download(url=kwik, dpath=DOWNLOADS, ep=arg, animename=animepicked, quality=res)
         
         # Track download in collection manager
         if result is not False:  # kwik_download returns False on failure
@@ -814,7 +819,7 @@ def download(arg=1, download_file=True, res = "720", prefer_dub=False):
             # Add to collection manager (without organizing - --sort handles that)
             cm = get_collection_manager()
             entry = cm.add_anime(animepicked)
-            episode_file = str(DOWNLOADS / f"{animepicked}_Episode_{arg}.mp4")
+            episode_file = str(episode_path)
             cm.add_episode_file(animepicked, arg, episode_file, organize=False)
             Banners.success_message(f"Added episode {arg} to collection for '{animepicked}'")
         else:
@@ -1610,7 +1615,12 @@ def main():
     pre_args, remaining = pre.parse_known_args()
 
     # Load configuration
-    cfg, cfg_path = load_app_config(pre_args.config)
+    cfg, cfg_path, cfg_warnings = load_app_config(pre_args.config)
+    for w in (cfg_warnings or []):
+        try:
+            print(f"WARNING: {w}", file=sys.stderr)
+        except Exception:
+            pass
 
     # Handle write-config
     if pre_args.write_config is not None:
@@ -1618,6 +1628,75 @@ def main():
         target = pre_args.write_config or default_path
         written = write_sample_config(target)
         print(f"Sample config written to: {written}")
+        return
+
+    if remaining and str(remaining[0]) == 'config':
+        sub = str(remaining[1]) if len(remaining) >= 2 else 'edit'
+        extra = [str(x) for x in (remaining[2:] if len(remaining) >= 3 else [])]
+
+        default_path = Path.home() / '.config' / 'autopahe' / 'config.ini'
+        if pre_args.config:
+            target_path = Path(pre_args.config).expanduser()
+        elif cfg_path:
+            target_path = Path(cfg_path)
+        else:
+            target_path = default_path
+
+        if sub in {'edit', ''}:
+            if extra and extra[0] in {'show', 'print'}:
+                try:
+                    if target_path.exists():
+                        print(target_path.read_text(encoding='utf-8'))
+                    else:
+                        print(sample_config_text())
+                except Exception as e:
+                    print(f"ERROR: Failed to read config: {e}", file=sys.stderr)
+                return
+
+            if extra and extra[0] in {'validate', 'check'}:
+                cfg2, cfg2_path, warns2 = load_app_config(str(target_path) if target_path else None)
+                if cfg2_path:
+                    print(f"Config file: {cfg2_path}")
+                else:
+                    print("Config file: (none found; using defaults)")
+                for w in (warns2 or []):
+                    print(f"WARNING: {w}", file=sys.stderr)
+                for k in sorted(cfg2.keys()):
+                    print(f"{k} = {cfg2[k]}")
+                return
+
+            try:
+                if not target_path.exists():
+                    write_sample_config(str(target_path))
+                editor = os.environ.get('EDITOR') or 'vi'
+                subprocess.call(shlex.split(editor) + [str(target_path)])
+            except Exception as e:
+                print(f"ERROR: Failed to open editor: {e}", file=sys.stderr)
+            return
+
+        if sub in {'show'}:
+            try:
+                if target_path.exists():
+                    print(target_path.read_text(encoding='utf-8'))
+                else:
+                    print(sample_config_text())
+            except Exception as e:
+                print(f"ERROR: Failed to read config: {e}", file=sys.stderr)
+            return
+
+        if sub in {'validate', 'check'}:
+            cfg2, cfg2_path, warns2 = load_app_config(str(target_path) if target_path else None)
+            if cfg2_path:
+                print(f"Config file: {cfg2_path}")
+            else:
+                print("Config file: (none found; using defaults)")
+            for w in (warns2 or []):
+                print(f"WARNING: {w}", file=sys.stderr)
+            for k in sorted(cfg2.keys()):
+                print(f"{k} = {cfg2[k]}")
+            return
+
+        print("ERROR: Unknown config subcommand. Use: autopahe config edit|show|validate", file=sys.stderr)
         return
 
     # Stash config globally for command_main
@@ -1728,6 +1807,7 @@ def main():
         print(f"AutoPahe v{AUTOPAHE_VERSION}")
         print("⚡ Anime Downloader with Advanced Features ⚡")
         return
+
 
     # Set browser env after final parse
     try:

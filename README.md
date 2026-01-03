@@ -18,6 +18,19 @@ A simple yet powerful tool to search, download, and stream your favorite anime e
 
 ## ✨ New in v3.4
 
+## 🧩 Configuration fixes (v3.4.1)
+
+- **Config resolution/quality is now robust**
+  - Accepts `480`, `720`, `1080` (also `360`, `best`, `worst`)
+  - Accepts values like `1080p`
+  - Inline comments like `resolution = 1080  # comment` are supported
+  - Invalid values no longer break config loading (falls back to `720` with a warning)
+
+- **New command: `autopahe config edit`**
+  - Open your config in `$EDITOR` (creates a sample config if missing)
+  - Print config: `autopahe config show`
+  - Validate config: `autopahe config validate`
+
 ### 📚 **New Modular Collection System**
 - **Complete collection package** - New `collection/` module with full metadata support
 - **Enhanced AnimeEntry model** - Now includes type, year, genres, synopsis, and ratings

@@ -1,19 +1,40 @@
 """
 Centralized configuration for AutoPahe data directories and paths.
 Provides a unified way to manage all project data locations.
+Cross-platform support for Windows, macOS, and Linux.
 """
 
 import os
 from pathlib import Path
 from typing import Optional
 
+from ap_core.platform_paths import (
+    get_data_dir,
+    get_config_dir,
+    get_cache_dir,
+    get_log_dir,
+    is_windows,
+)
+
+def _get_data_dir() -> Path:
+    """Get the appropriate data directory based on environment and platform."""
+    if os.getenv('AUTO_PAHE_PORTABLE'):
+        # Portable mode: use home directory
+        return Path.home() / 'autopahe_data'
+    elif os.getenv('AUTO_PAHE_DEV'):
+        # Development mode: use local data directory
+        return Path(__file__).parent / 'data'
+    else:
+        # Standard installation: use platform-appropriate location
+        return get_data_dir()
+
 # Base data directory - centralized location for all project data
-DATA_DIR = Path.home() / 'autopahe_data' if os.getenv('AUTO_PAHE_PORTABLE') else Path(__file__).parent / 'data'
+DATA_DIR = _get_data_dir()
 
 # Data subdirectories
 RECORDS_DIR = DATA_DIR / 'records'
-LOGS_DIR = DATA_DIR / 'logs'
-CACHE_DIR = DATA_DIR / 'cache'
+LOGS_DIR = get_log_dir() if not os.getenv('AUTO_PAHE_PORTABLE') else DATA_DIR / 'logs'
+CACHE_DIR = get_cache_dir() if not os.getenv('AUTO_PAHE_PORTABLE') else DATA_DIR / 'cache'
 COLLECTION_DIR = DATA_DIR / 'collection'
 BACKUPS_DIR = DATA_DIR / 'backups'
 
@@ -23,10 +44,16 @@ COLLECTION_METADATA_FILE = COLLECTION_DIR / 'collection.json'
 LOG_FILE = LOGS_DIR / 'autopahe.log'
 BACKUP_DATABASE_FILE = BACKUPS_DIR / 'animerecord_backup.json'
 
-# Legacy paths for migration
+# Legacy paths for migration (check multiple locations)
 LEGACY_DATABASE_FILE = Path(__file__).parent / 'json_data' / 'animerecord.json'
-LEGACY_COLLECTION_DIR = Path.home() / '.cache' / 'autopahe' / 'collection'
 LEGACY_ROOT_DATABASE = Path(__file__).parent / 'animerecord.json'
+
+# Platform-specific legacy collection paths
+if is_windows():
+    _legacy_cache_base = Path.home() / 'AppData' / 'Local' / 'autopahe'
+else:
+    _legacy_cache_base = Path.home() / '.cache' / 'autopahe'
+LEGACY_COLLECTION_DIR = _legacy_cache_base / 'collection'
 
 def ensure_data_directories():
     """Create all data directories if they don't exist."""

@@ -12,12 +12,13 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
+from ap_core.platform_paths import get_cache_dir as _get_platform_cache_dir, ensure_dir
+
 
 def get_cache_dir():
-    """Get or create cache directory"""
-    home = Path.home()
-    cache_dir = home / ".cache" / "autopahe"
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    """Get or create cache directory (cross-platform)"""
+    cache_dir = _get_platform_cache_dir()
+    ensure_dir(cache_dir)
     return cache_dir
 
 

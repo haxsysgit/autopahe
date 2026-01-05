@@ -1,5 +1,61 @@
 # AutoPahe Changelog
 
+## [v3.4.2] - 2026-01-05
+
+### 🪟 WINDOWS COMPATIBILITY
+
+#### Cross-Platform Path Utilities
+- **New `platform_paths.py` module** - Centralized cross-platform path handling
+- **Platform-aware directories**: Proper paths for Windows (`%APPDATA%`, `%LOCALAPPDATA%`), macOS (`~/Library`), Linux (`~/.config`, `~/.cache`)
+- **Windows Downloads detection** - Reads Windows registry for actual Downloads folder location
+- **Unified path handling** - All modules now use consistent platform-appropriate paths
+
+#### Fixed Modules
+- `ap_core/cache.py` - Uses platform cache directory
+- `ap_core/config.py` - Platform-aware config locations
+- `ap_core/browser.py` - Playwright data in platform cache
+- `ap_core/resume_manager.py` - Resume states in platform cache
+- `collection/manager.py` - Platform-aware collection paths
+- `config.py` (root) - Centralized data directories
+
+### 🗂️ COLLECTION ORGANIZE FIX
+
+#### In-Place Organization (Breaking Change)
+- **Files now organize in-place by default** - Files stay in their current directory
+- **Fixed Windows drive issues** - No more moving files from E: to Downloads
+- **New `--move-to-downloads` flag** - Use old behavior if needed
+- **Removed `os.chdir()` usage** - Fixed path issues on Windows
+
+#### Updated Files
+- `features/pahesort.py` - Rewrote `rename_anime()` and `organize_anime()` using `Path`
+- `collection/manager.py` - Added `in_place` parameter to `organize_collection()`
+- `collection/commands.py` - Shows organization mode, added `--move-to-downloads` option
+
+### 🧹 CLEANUP
+
+#### Removed Dependencies
+- **Removed `lxml`** - Was causing Windows installation issues, not directly used
+- **Removed `pathlib2`** - Not needed for Python 3.8+
+- **Added `beautifulsoup4`** to `pyproject.toml` for consistency
+
+#### Removed Selenium References
+- **Cleaned documentation** - Replaced all Selenium mentions with Playwright
+- **Updated `Docs/CHANGES_v3.0.0.md`** - Removed outdated Selenium references
+- **Updated `Docs/about.txt`** - Cleaned up technology description
+
+### 📁 NEW FILES
+- `ap_core/platform_paths.py` - Cross-platform path utilities
+
+### 🔄 MODIFIED FILES
+- `setup.py` - Removed lxml, pathlib2; added playwright, rich
+- `requirements.txt` - Removed lxml; added colorama, rich
+- `pyproject.toml` - Added beautifulsoup4, aligned versions
+- `features/pahesort.py` - Cross-platform file operations
+- `collection/manager.py` - In-place organization support
+- `collection/commands.py` - Updated organize command
+
+---
+
 ## [v3.3.0] - 2025-11-29
 
 ### 🗂️ MAJOR RESTRUCTURING

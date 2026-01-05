@@ -1,6 +1,7 @@
 import os
 import sys
 import shutil
+import platform
 from colorama import Fore, Style, init
 init()
 
@@ -9,7 +10,7 @@ current_system_os = str(sys.platform)
 class Banners:
     def header():
         """Display original banner with subtitle like webpage header"""
-        os.system('cls' if current_system_os.lower() == 'windows' else 'clear')
+        os.system('cls' if platform.system() == 'Windows' else 'clear')
         
         # Original banner
         print('''

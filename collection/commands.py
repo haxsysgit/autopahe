@@ -54,7 +54,8 @@ def handle_collection_command(args: List[str], manager: 'CollectionManager') -> 
         print("  show <title>   - Show anime details")
         print("  episodes <title> - List episodes for anime")
         print("  search <query> - Search collection")
-        print("  organize       - Organize collection files")
+        print("  organize       - Organize collection files (in-place by default)")
+        print("                   Options: --dry-run, --move-to-downloads")
         print("  duplicates     - Find and remove duplicates")
         print("  export <path>  - Export collection")
         print("  import <path>  - Import collection")
@@ -278,15 +279,22 @@ def _cmd_search(manager: 'CollectionManager', args: List[str]) -> None:
 def _cmd_organize(manager: 'CollectionManager', args: List[str]) -> None:
     """Organize collection files."""
     dry_run = '--dry-run' in args or '-n' in args
+    # By default, organize in-place. Use --move-to-downloads to move files to collection_dir
+    in_place = '--move-to-downloads' not in args and '--move' not in args
     
     print()
     if dry_run:
         print("🔍 Organization Preview (Dry Run)")
     else:
         print("🗂️ Organizing Collection...")
+    
+    if in_place:
+        print("   Mode: In-place (files stay in their current directory)")
+    else:
+        print(f"   Mode: Move to {manager.collection_dir}")
     print("=" * 40)
     
-    results = manager.organize_collection(dry_run=dry_run)
+    results = manager.organize_collection(dry_run=dry_run, in_place=in_place)
     
     if results['operations']:
         print()

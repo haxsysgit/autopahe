@@ -3,11 +3,20 @@ import configparser
 from pathlib import Path
 from typing import List, Optional
 
-DEFAULT_LOCATIONS = [
-    Path.home() / ".config" / "autopahe" / "config.ini",
-    Path.home() / ".autopahe.ini",
-    Path.cwd() / "autopahe.ini",
-]
+from ap_core.platform_paths import get_config_dir, get_legacy_config_locations, is_windows
+
+def _get_default_config_locations() -> List[Path]:
+    """Get platform-appropriate config file locations."""
+    locations = [
+        get_config_dir() / "config.ini",
+    ]
+    # Add legacy locations for backwards compatibility
+    locations.extend(get_legacy_config_locations())
+    # Also check current working directory
+    locations.append(Path.cwd() / "autopahe.ini")
+    return locations
+
+DEFAULT_LOCATIONS = _get_default_config_locations()
 
 DEFAULTS = {
     "browser": "chrome",
@@ -162,23 +171,27 @@ def write_sample_config(path: str):
 
 
 def sample_config_text() -> str:
-    return (
-        """# AutoPahe configuration
+    """Generate sample config with platform-appropriate examples."""
+    if is_windows():
+        download_example = r"# Example: C:\Users\YourName\Downloads"
+        sort_example = r"# Example: C:\Users\YourName\Videos\Anime"
+    else:
+        download_example = "# Example: /home/you/Downloads (Linux) or /Users/you/Downloads (macOS)"
+        sort_example = "# Example: /home/you/Videos/Anime"
+    
+    return f"""# AutoPahe configuration
 [defaults]
-# Default browser: chrome or firefox
+# Default browser: chrome, chromium, or firefox
 browser = chrome
 
-# Default resolution: 480, 720, 1080
+# Default resolution: 360, 480, 720, 1080, best, worst
 resolution = 720
 
 # Default workers for multi-download (use >1 with caution)
 workers = 1
 
 # Optional download directory override (leave empty to use OS default Downloads)
-# Example: /home/you/Downloads
-# On Windows: C:\\Users\\you\\Downloads
-# On macOS: /Users/you/Downloads
-# On Linux: /home/you/Downloads
+{download_example}
 download_dir = 
 
 # Optional: automatically sort after downloads (not enabled by default)
@@ -188,6 +201,6 @@ sort_on_complete = false
 sort_mode = 
 
 # Optional: sort path override (leave empty to use download_dir or OS default)
+{sort_example}
 sort_path = 
 """
-    )

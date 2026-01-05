@@ -20,7 +20,7 @@ def read_requirements():
 
 setup(
     name="autopahe",
-    version="3.4.0",
+    version="3.4.2",
     author="haxsys",
     author_email="haxsysgit@gmail.com",
     description="Download and stream anime episodes easily from AnimePahe",
@@ -52,11 +52,10 @@ setup(
     install_requires=[
         "requests>=2.25.0",
         "beautifulsoup4>=4.9.0",
-        "lxml>=4.6.0",
         "colorama>=0.4.4",
-        "pathlib2>=2.3.6; python_version<'3.4'",
         "tqdm>=4.60.0",
-        "click>=8.0.0",
+        "playwright>=1.45.0",
+        "rich>=13.0.0",
     ],
     extras_require={
         "dev": [

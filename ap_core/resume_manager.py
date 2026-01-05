@@ -89,9 +89,17 @@ class SmartResumeManager:
         Initialize the resume manager.
         
         Args:
-            state_dir: Directory to store download states (default: ~/.cache/autopahe/resume)
+            state_dir: Directory to store download states (uses platform-appropriate cache dir)
         """
-        self.state_dir = state_dir or Path.home() / '.cache' / 'autopahe' / 'resume'
+        if state_dir:
+            self.state_dir = state_dir
+        else:
+            # Use platform-appropriate cache directory
+            try:
+                from ap_core.platform_paths import get_cache_dir
+                self.state_dir = get_cache_dir() / 'resume'
+            except ImportError:
+                self.state_dir = Path.home() / '.cache' / 'autopahe' / 'resume'
         self.state_dir.mkdir(parents=True, exist_ok=True)
         
         self.state_file = self.state_dir / 'download_states.json'

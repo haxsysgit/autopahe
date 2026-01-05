@@ -48,10 +48,24 @@ class CollectionManager:
             self.metadata_dir = COLLECTION_DIR
             self.metadata_file = metadata_file or COLLECTION_METADATA_FILE
         except ImportError:
-            self.metadata_dir = Path.home() / '.config' / 'autopahe' / 'collection'
+            # Fallback to platform-appropriate paths
+            try:
+                from ap_core.platform_paths import get_data_dir, get_downloads_dir
+                self.metadata_dir = get_data_dir() / 'collection'
+            except ImportError:
+                # Ultimate fallback for standalone usage
+                self.metadata_dir = Path.home() / '.config' / 'autopahe' / 'collection'
             self.metadata_file = metadata_file or self.metadata_dir / 'collection.json'
         
-        self.collection_dir = collection_dir or Path.home() / 'Downloads'
+        # Use platform-appropriate downloads directory
+        if collection_dir:
+            self.collection_dir = collection_dir
+        else:
+            try:
+                from ap_core.platform_paths import get_downloads_dir
+                self.collection_dir = get_downloads_dir()
+            except ImportError:
+                self.collection_dir = Path.home() / 'Downloads'
         self.collection: Dict[str, AnimeEntry] = {}
         
         # Ensure metadata directory exists
@@ -413,12 +427,14 @@ class CollectionManager:
         
         return removed_count, bytes_freed
     
-    def organize_collection(self, dry_run: bool = False) -> Dict[str, Any]:
+    def organize_collection(self, dry_run: bool = False, in_place: bool = True) -> Dict[str, Any]:
         """
         Organize all collection files into proper folder structure.
         
         Args:
             dry_run: Only report, don't move files
+            in_place: If True, organize files in their current directory (default).
+                      If False, move files to collection_dir.
             
         Returns:
             Organization results
@@ -437,13 +453,23 @@ class CollectionManager:
                 if not episode.file_path or not os.path.exists(episode.file_path):
                     continue
                 
-                # Determine target folder
-                anime_folder = self.collection_dir / self._sanitize_filename(title)
+                source_path = Path(episode.file_path)
+                
+                # Determine the base directory for organizing
+                # in_place=True: use the parent directory of the current file
+                # in_place=False: use the collection_dir (Downloads by default)
+                if in_place:
+                    base_dir = source_path.parent
+                else:
+                    base_dir = self.collection_dir
+                
+                # Determine target folder (create anime subfolder)
+                anime_folder = base_dir / self._sanitize_filename(title)
                 if episode.season > 1 or entry.total_episodes > 26:
                     anime_folder = anime_folder / f"Season {episode.season:02d}"
                 
                 # Determine target filename
-                ext = Path(episode.file_path).suffix
+                ext = source_path.suffix
                 if episode.season > 1:
                     new_filename = f"{title} S{episode.season:02d}E{episode.number:02d}{ext}"
                 else:
@@ -451,12 +477,16 @@ class CollectionManager:
                 
                 target_path = anime_folder / self._sanitize_filename(new_filename)
                 
-                # Skip if already organized
-                if str(episode.file_path) == str(target_path):
+                # Skip if already organized (same path)
+                if source_path.resolve() == target_path.resolve():
+                    continue
+                
+                # Skip if file is already in an anime-named folder with correct name
+                if source_path.parent.name == self._sanitize_filename(title) and source_path.name == self._sanitize_filename(new_filename):
                     continue
                 
                 results['operations'].append({
-                    'from': episode.file_path,
+                    'from': str(source_path),
                     'to': str(target_path),
                     'anime': title,
                     'episode': episode.number,
@@ -469,12 +499,12 @@ class CollectionManager:
                             created_folders.add(str(anime_folder))
                             results['folders_created'] += 1
                         
-                        shutil.move(episode.file_path, str(target_path))
+                        shutil.move(str(source_path), str(target_path))
                         episode.file_path = str(target_path)
                         results['files_moved'] += 1
                     except Exception as e:
                         results['errors'].append({
-                            'file': episode.file_path,
+                            'file': str(source_path),
                             'error': str(e),
                         })
         

@@ -175,7 +175,12 @@ def get_pw_context(browser_choice: str = None, headless: bool = True):
         # Normalize edge alias
         if choice == "edge":
             choice = "msedge"
-        user_data_dir = str(Path.home() / ".cache" / "autopahe-pw" / choice)
+        # Use platform-appropriate cache directory for browser data
+        try:
+            from ap_core.platform_paths import get_cache_dir
+            user_data_dir = str(get_cache_dir() / "playwright" / choice)
+        except ImportError:
+            user_data_dir = str(Path.home() / ".cache" / "autopahe-pw" / choice)
         
         try:
             if choice == "firefox":

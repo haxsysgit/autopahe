@@ -272,40 +272,54 @@ atexit.register(cleanup_browsers)
 
 def setup_environment():
     """First-time setup to make the CLI runnable system-wide."""
+    import subprocess
+    import sys
+    from ap_core.platform_paths import get_config_dir, is_windows
+    
+    # Write sample config to platform-appropriate location
     try:
-        default_path = Path.home() / '.config' / 'autopahe' / 'config.ini'
+        config_dir = get_config_dir()
+        default_path = config_dir / 'config.ini'
         write_sample_config(str(default_path))
         print(f"✓ Sample config written to: {default_path}")
     except Exception as e:
         print(f"Config setup skipped: {e}")
     
-    # Run the comprehensive installer
+    # Install Playwright browser
+    print("🔧 Installing browser for automation...")
     try:
-        print("🔧 Running comprehensive setup...")
-        # Import and run the install script
-        import subprocess
-        import sys
-        
-        install_script = Path(__file__).parent / "install.py"
-        if install_script.exists():
-            result = subprocess.run([sys.executable, str(install_script)])
-            if result.returncode == 0:
-                print("✅ Setup completed successfully!")
-            else:
-                print("❌ Setup failed. Please check the error messages above.")
+        # Try to install chrome first, fall back to chromium
+        os.environ['AUTOPAHE_BROWSER'] = 'chrome'
+        print("   Installing Chrome browser...")
+        rc = subprocess.run(
+            [sys.executable, '-m', 'playwright', 'install', 'chrome'],
+            check=False,
+            capture_output=True
+        )
+        if rc.returncode != 0:
+            print("   Chrome not available, trying Chromium...")
+            rc = subprocess.run(
+                [sys.executable, '-m', 'playwright', 'install', 'chromium'],
+                check=False,
+                capture_output=True
+            )
+            if rc.returncode != 0:
+                print("❌ Failed to install browser. Please run manually:")
+                print("   python -m playwright install chromium")
                 return False
-        else:
-            print("⚠️  install.py not found, falling back to basic setup...")
-            # Fallback to basic Playwright install
-            os.environ['AUTOPAHE_BROWSER'] = 'chrome'
-            rc = subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chrome'], check=False)
-            if getattr(rc, 'returncode', 1) != 0:
-                subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chromium'], check=False)
+            os.environ['AUTOPAHE_BROWSER'] = 'chromium'
+        
+        print("✅ Setup completed successfully!")
+        print(f"\n📁 Config location: {default_path}")
+        print("   Edit with: autopahe config edit")
+        return True
+        
     except Exception as e:
         print(f"❌ Setup failed: {e}")
+        print("\nPlease install Playwright manually:")
+        print("   pip install playwright")
+        print("   python -m playwright install chromium")
         return False
-    
-    return True
 
 def get_performance_stats():
     """Get performance statistics for the current session."""
@@ -1624,7 +1638,8 @@ def main():
 
     # Handle write-config
     if pre_args.write_config is not None:
-        default_path = str(Path.home() / '.config' / 'autopahe' / 'config.ini')
+        from ap_core.platform_paths import get_config_dir
+        default_path = str(get_config_dir() / 'config.ini')
         target = pre_args.write_config or default_path
         written = write_sample_config(target)
         print(f"Sample config written to: {written}")
@@ -1634,7 +1649,8 @@ def main():
         sub = str(remaining[1]) if len(remaining) >= 2 else 'edit'
         extra = [str(x) for x in (remaining[2:] if len(remaining) >= 3 else [])]
 
-        default_path = Path.home() / '.config' / 'autopahe' / 'config.ini'
+        from ap_core.platform_paths import get_config_dir
+        default_path = get_config_dir() / 'config.ini'
         if pre_args.config:
             target_path = Path(pre_args.config).expanduser()
         elif cfg_path:
@@ -1668,10 +1684,25 @@ def main():
             try:
                 if not target_path.exists():
                     write_sample_config(str(target_path))
-                editor = os.environ.get('EDITOR') or 'vi'
-                subprocess.call(shlex.split(editor) + [str(target_path)])
+                
+                # Get platform-appropriate editor
+                from ap_core.platform_paths import is_windows
+                if is_windows():
+                    # On Windows, use notepad or EDITOR env var
+                    editor = os.environ.get('EDITOR') or 'notepad'
+                else:
+                    # On Unix, use EDITOR env var or vi
+                    editor = os.environ.get('EDITOR') or 'vi'
+                
+                # On Windows, don't use shlex.split for notepad
+                if is_windows() and editor.lower() == 'notepad':
+                    subprocess.call([editor, str(target_path)])
+                else:
+                    subprocess.call(shlex.split(editor) + [str(target_path)])
             except Exception as e:
                 print(f"ERROR: Failed to open editor: {e}", file=sys.stderr)
+                print(f"Config file location: {target_path}", file=sys.stderr)
+                print("You can manually edit this file with any text editor.", file=sys.stderr)
             return
 
         if sub in {'show'}:
@@ -1825,6 +1856,13 @@ def main():
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
         logging.debug("Verbose logging enabled")
+        # Show config details in verbose mode
+        if cfg_path:
+            logging.debug(f"Config loaded from: {cfg_path}")
+        else:
+            logging.debug("No config file found, using defaults")
+        logging.debug(f"Config values: browser={cfg.get('browser')}, resolution={cfg.get('resolution')}, workers={cfg.get('workers')}")
+        logging.debug(f"Effective resolution: {args.resolution}")
     else:
         # Default: ERROR level (only errors) - completely clean user output
         logging.getLogger().setLevel(logging.ERROR)

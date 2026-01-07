@@ -1,5 +1,30 @@
 # AutoPahe Changelog
 
+## [v3.4.3] - 2026-01-07
+
+### 🪟 WINDOWS FIXES
+
+#### Setup Command
+- **Fixed `--setup` on Windows** - No longer requires `install.py` file
+- **Direct Playwright installation** - Installs Chrome/Chromium directly via `playwright install`
+- **Better error messages** - Shows manual install instructions if automated setup fails
+
+#### Config Editor
+- **Fixed `config edit` on Windows** - Uses `notepad` instead of `vi` by default
+- **Platform detection** - Automatically selects appropriate editor for OS
+- **Fallback guidance** - Shows config file path if editor fails to open
+
+#### Config Path Fixes
+- **Platform-aware config paths** - All config operations now use `get_config_dir()`
+- **Windows AppData support** - Config stored in `%APPDATA%\autopahe` on Windows
+- **Verbose config debugging** - Use `--verbose` to see which config file is loaded
+
+### 🔧 IMPROVEMENTS
+- Added debug output for config loading with `--verbose` flag
+- Better error messages throughout Windows-specific code paths
+
+---
+
 ## [v3.4.2] - 2026-01-05
 
 ### 🪟 WINDOWS COMPATIBILITY

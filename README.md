@@ -1,246 +1,101 @@
-
 <!-- Badges -->
 [![PyPI version](https://badge.fury.io/py/autopahe.svg)](https://pypi.org/project/autopahe/)
-[![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/haxsysgit/autopahe/)
 [![License](https://img.shields.io/github/license/haxsysgit/autopahe?color=brightgreen)](https://github.com/haxsysgit/autopahe/blob/main/license.md)
-[![OpenIssues](https://img.shields.io/github/issues/haxsysgit/autopahe?color=important)](https://github.com/haxsysgit/autopahe/issues)
-<!--LineBreak-->
-[![Windows](https://img.shields.io/badge/Windows-white?style=flat-square&logo=windows&logoColor=blue)](https://github.com/haxsysgit/autopahe/)
-[![macOS](https://img.shields.io/badge/macOS-white?style=flat-square&logo=apple&logoColor=black)](https://github.com/haxsysgit/autopahe/)
-[![Linux](https://img.shields.io/badge/Linux-white?style=flat-square&logo=linux&logoColor=black)](https://github.com/haxsysgit/autopahe/)
-<!-- Badges -->
+[![Windows](https://img.shields.io/badge/Windows-0078D6?logo=windows)](https://github.com/haxsysgit/autopahe/)
+[![macOS](https://img.shields.io/badge/macOS-000000?logo=apple)](https://github.com/haxsysgit/autopahe/)
+[![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black)](https://github.com/haxsysgit/autopahe/)
 
 # AutoPahe
 
-> **Download and stream anime episodes easily from AnimePahe**
+> **Download and stream anime from AnimePahe**
 
-A simple yet powerful tool to search, download, and stream your favorite anime episodes. Works on Windows, Mac, and Linux with a beautiful, colorful interface.
+Search, download, and stream anime episodes. Cross-platform (Windows, Mac, Linux).
 
-## ✨ New in v3.4
+## 🚀 Installation
 
-## 🧩 Configuration fixes (v3.4.1)
-
-- **Config resolution/quality is now robust**
-  - Accepts `480`, `720`, `1080` (also `360`, `best`, `worst`)
-  - Accepts values like `1080p`
-  - Inline comments like `resolution = 1080  # comment` are supported
-  - Invalid values no longer break config loading (falls back to `720` with a warning)
-
-- **New command: `autopahe config edit`**
-  - Open your config in `$EDITOR` (creates a sample config if missing)
-  - Print config: `autopahe config show`
-  - Validate config: `autopahe config validate`
-
-### 📚 **New Modular Collection System**
-- **Complete collection package** - New `collection/` module with full metadata support
-- **Enhanced AnimeEntry model** - Now includes type, year, genres, synopsis, and ratings
-- **Rich collection commands** - stats, view, show, episodes, search, organize, duplicates, export, import
-- **Watch status tracking** - Track anime as unwatched, watching, completed, on hold, dropped, or plan to watch
-- **Powerful search and filtering** - Find anime by title, type, status, genres, and more
-
-### 🚀 **Interactive First-Time Setup**
-- **Automatic browser installation** - Prompts to install Playwright browsers on first run
-- **Smart fallback system** - Tries Chrome first, then Chromium if needed
-- **Seamless onboarding** - No more manual setup requirements for new users
-- **Environment control** - Skip auto-install with `AUTOPAHE_SKIP_AUTO_INSTALL` environment variable
-
-### 🛠️ **Technical Improvements**
-- **Modular architecture** - Replaced old collection_manager.py with new collection/ package
-- **Enhanced data models** - Better type safety and data validation
-- **Improved import/export** - Backup and restore your collection data
-- **Better error handling** - More robust collection management
-
-## 🎯 What It Does
-
-- **Search Anime** - Find any anime by name with smart suggestions
-- **Download Episodes** - Get single episodes or entire seasons
-- **Fast Downloads** - Download multiple episodes at once
-- **Resume Downloads** - Pick up where you left off if interrupted
-- **Organize Collection** - Keep your downloaded anime neatly organized
-- **Desktop Notifications** - Get alerts when downloads finish
-
-## 🚀 Quick Start
-
-### Installation
-
-#### 🚀 **Easiest Setup (Recommended)**
+**From PyPI (recommended):**
 ```bash
-# Clone and run our automated installer
-git clone https://github.com/haxsysgit/autopahe.git
-cd autopahe
-python install.py
+pip install autopahe
+autopahe --setup
 ```
 
-#### 📦 **Alternative Methods**
-
-**Using UV (fastest):**
-```bash
-git clone https://github.com/haxsysgit/autopahe.git
-cd autopahe
-uv sync
-uv run playwright install
-```
-
-**Using pip:**
+**From source:**
 ```bash
 git clone https://github.com/haxsysgit/autopahe.git
 cd autopahe
 pip install -r requirements.txt
-playwright install
+playwright install chromium
 ```
 
-**From PyPI:**
-```bash
-pip install autopahe
-autopahe --setup  # Required first-time setup
-```
+## 📖 Usage
 
-### 🔧 First-Time Setup (Required)
-
-After installation, run the setup command once to install browser engines:
-
-```bash
-autopahe --setup
-```
-
-This installs Playwright browsers (~500MB) needed for bypassing DDoS protection. You only need to do this once.
-
-### Basic Usage
 ```bash
 # Search for anime
-autopahe -s "your anime name"
+autopahe -s "anime name"
 
-# Download a single episode
+# Download episode 1
 autopahe -s "anime name" -i 0 -d 1
 
-# Download entire season
+# Download episodes 1-12
 autopahe -s "anime name" -i 0 -md 1-12
-```
-## 📖 More Examples
 
-### Download Different Quality
+# Stream episode 1
+autopahe -s "anime name" -i 0 -st 1
+```
+
+### More Options
 ```bash
-# Download in 1080p (best quality)
+# Different quality (360, 480, 720, 1080)
 autopahe -s "anime name" -i 0 -d 1 -p 1080
 
-# Download in 360p (smaller file size)
-autopahe -s "anime name" -i 0 -d 1 -p 360
-```
+# Parallel downloads
+autopahe -s "anime name" -i 0 -md 1-12 --workers 3
 
-### Download Multiple Episodes
-```bash
-# Download episodes 1, 3, and 5
-autopahe -s "anime name" -i 0 -md "1,3,5"
-
-# Download episodes 1 through 12
-autopahe -s "anime name" -i 0 -md "1-12"
-
-# Download with faster parallel downloads
-autopahe -s "anime name" -i 0 -md "1-12" --workers 3
-
-# Download English dubbed versions (if available)
-autopahe -s "anime name" -i 0 -md "1-12" --dub
-```
-
-### 🎬 Stream Anime Episodes
-```bash
-# Stream episode 1 directly (auto-detects player)
-autopahe -s "anime name" -i 0 -st 1
+# English dub (if available)
+autopahe -s "anime name" -i 0 -d 1 --dub
 
 # Stream with specific player
 autopahe -s "anime name" -i 0 -st 1 --player vlc
-autopahe -s "anime name" -i 0 -st 1 --player mpv
-
-# Stream multiple episodes
-autopahe -s "anime name" -i 0 -st "1-3"
-
-# Stream in different quality
-autopahe -s "anime name" -i 0 -st 1 -p 1080
-
-# Stream English dubbed versions (if available)
-autopahe -s "anime name" -i 0 -st 1 --dub
 ```
 
-**Supported Players:**
-- **Windows**: VLC, MPV, Windows Media Player, MPC-HC, MPC-BE
-- **macOS**: VLC, MPV, Iina
-- **Linux**: VLC, MPV, MPlayer, SMPlayer, Celluloid
+## ⚙️ Configuration
 
-**If no player is found, AutoPahe will:**
-- Show installation instructions for your OS
-- Suggest available players
-- Guide you through setup
-
-### Get Download Links Only
 ```bash
-# Get the download link without downloading
-autopahe -s "anime name" -i 0 -l 1
+# Edit config
+autopahe config edit
+
+# Show config
+autopahe config show
+
+# Validate config
+autopahe config validate
 ```
 
-## 💡 Tips
+Config location:
+- **Windows**: `%APPDATA%\autopahe\config.ini`
+- **Linux/Mac**: `~/.config/autopahe/config.ini`
 
-- Use quotes around anime names with spaces: `"Attack on Titan"`
-- The first time you run it, it may take a moment to set up
-- Downloads go to your `Downloads/Anime` folder by default
-- Use `--verbose` to see detailed information while downloading
-- Use `--quiet` to see minimal output
+## 📚 Collection Management
 
-## 🛠️ What You Need
+```bash
+# View collection stats
+autopahe --collection stats
 
-- Python 3.8 or higher
-- Internet connection
-- About 500MB of free space for setup
+# Organize downloaded files
+autopahe --collection organize
 
-**That's it!** The tool handles everything else automatically.
+# Find duplicates
+autopahe --collection duplicates
+```
 
-## 🎨 Beautiful Interface
+## 🎬 Supported Players
 
-AutoPahe features a colorful, organized interface that looks like a webpage:
-- Clean section headers with progress indicators
-- Colored text for easy reading
-- Organized layout with proper spacing
-- No technical clutter - just what you need
-
-## 📱 Works Everywhere
-
-- **Windows** - Full support with desktop notifications
-- **Mac** - Native integration and notifications  
-- **Linux** - Complete functionality
-
-## 🆘 Need Help?
-
-If you run into any issues:
-1. Make sure you have Python 3.8 or higher
-2. Check your internet connection
-3. Try using quotes around anime names with spaces
-
-For more help, visit our GitHub page or report an issue.
-
----
+VLC, MPV, MPC-HC, MPC-BE (Windows), Iina (macOS), SMPlayer, Celluloid (Linux)
 
 ## 📜 License
 
-This project is licensed under the MIT License - see the [LICENSE](license.md) file for details.
+MIT License - see [LICENSE](license.md)
 
-## 🤝 Contributing
+## 🆘 Help
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## 📞 Support
-
-If you need help or have questions, visit our [GitHub Issues](https://github.com/haxsysgit/autopahe/issues) page.
-
-## 🔧 Advanced Usage
-
-For power users who want more control and features, see our [Advanced Usage Guide](ADVANCED.md) which covers:
-
-- **Detailed command reference** with all available options
-- **Configuration system** for customizing settings
-- **Batch operations** and parallel downloads
-- **Record management** for tracking your anime collection
-- **File organization** and sorting options
-- **Performance tuning** and troubleshooting
-
----
-
-**Enjoy AutoPahe! 🎬**
+[GitHub Issues](https://github.com/haxsysgit/autopahe/issues) | [Discussions](https://github.com/haxsysgit/autopahe/discussions)

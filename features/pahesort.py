@@ -3,6 +3,85 @@ import shutil
 import re
 import argparse
 from pathlib import Path
+from typing import Optional, Dict, List, Tuple
+
+
+def _get_collection_titles() -> Dict[str, str]:
+    """
+    Get all anime titles from collection/records for fuzzy matching.
+    Returns dict mapping normalized_name -> original_title
+    """
+    titles = {}
+    try:
+        from collection import get_collection_manager
+        manager = get_collection_manager()
+        for title in manager.collection.keys():
+            # Create normalized version for matching
+            normalized = re.sub(r'[^a-zA-Z0-9]', '', title.lower())
+            titles[normalized] = title
+    except Exception:
+        pass
+    
+    try:
+        from features.manager import load_database
+        db = load_database()
+        for record in db.values():
+            title = record.get('title', '')
+            if title:
+                normalized = re.sub(r'[^a-zA-Z0-9]', '', title.lower())
+                titles[normalized] = title
+    except Exception:
+        pass
+    
+    return titles
+
+
+def _match_file_to_collection(filename: str, collection_titles: Dict[str, str]) -> Optional[Tuple[str, str]]:
+    """
+    Try to match a filename to a collection title.
+    Returns (anime_title, episode_num) or None if no match.
+    """
+    if not collection_titles:
+        return None
+    
+    # Extract potential anime name and episode from filename
+    name_part = Path(filename).stem
+    
+    # Try to find episode number at the end or after common separators
+    episode_match = re.search(r'[-_\s](\d{1,3})(?:v\d)?(?:[-_\s]|$)', name_part)
+    if not episode_match:
+        episode_match = re.search(r'(\d{1,3})(?:v\d)?\.(?:mp4|mkv|avi)$', filename, re.IGNORECASE)
+    
+    episode_num = episode_match.group(1) if episode_match else None
+    
+    # Normalize the filename for matching
+    normalized_name = re.sub(r'[^a-zA-Z0-9]', '', name_part.lower())
+    
+    # Try to match against collection titles
+    best_match = None
+    best_score = 0
+    
+    for norm_title, original_title in collection_titles.items():
+        # Check if the normalized title is contained in the filename
+        if norm_title in normalized_name or normalized_name in norm_title:
+            score = len(norm_title)
+            if score > best_score:
+                best_score = score
+                best_match = original_title
+        
+        # Also try partial matching (at least 70% of title chars match)
+        common_chars = sum(1 for c in norm_title if c in normalized_name)
+        if len(norm_title) > 0:
+            match_ratio = common_chars / len(norm_title)
+            if match_ratio > 0.7 and common_chars > best_score:
+                best_score = common_chars
+                best_match = original_title
+    
+    if best_match and episode_num:
+        return (best_match, episode_num.zfill(2))
+    
+    return None
+
 
 def gather_anime(path: str, dry_run: bool = False):
     if path:
@@ -109,6 +188,9 @@ def organize_anime(path: str, animepahe: bool = False, dry_run: bool = False):
     Organize anime files into subfolders based on anime name.
     Files are organized in-place (in their current directory).
     
+    Now also checks the collection/records database for files that don't match
+    the standard AnimePahe format, allowing organization of renamed files.
+    
     Args:
         path: Directory containing anime files
         animepahe: If True, first gather AnimePahe files into a subfolder
@@ -133,23 +215,56 @@ def organize_anime(path: str, animepahe: bool = False, dry_run: bool = False):
         print(f"\nNo files found in {folder_path}")
         return
 
+    # Load collection titles for fallback matching
+    collection_titles = _get_collection_titles()
+    if collection_titles:
+        print(f"📚 Loaded {len(collection_titles)} titles from collection for matching")
+
     files_organized = 0
+    files_skipped = []
+    
     for file_path in anime_files:
         file = file_path.name
+        ext = file_path.suffix.lower()
         
-        # Match renamed files: "01-Anime_Name-720p.mp4"
+        # Skip non-video files
+        if ext not in ['.mp4', '.mkv', '.avi', '.webm']:
+            continue
+        
+        anime_name = None
+        episode_num = None
+        
+        # Method 1: Match renamed files: "01-Anime_Name-720p.mp4"
         match = re.match(r"^\d+-(.*?)-\d+p", file)
         if not match:
             match = re.match(r"^\d+-(.*?)-[a-zA-Z]+", file)
-
+        
         if match:
             anime_name = match.group(1).strip()
-        else:
-            print(f"\nSkipping file: {file} (doesn't match expected format)")
+        
+        # Method 2: Match AnimePahe format: "AnimePahe_Name_01_720p.mp4"
+        if not anime_name:
+            match = re.match(r"^AnimePahe_(.+?)_(\d+)_\d+p\.mp4$", file)
+            if match:
+                anime_name = match.group(1).replace('_', ' ').strip()
+                episode_num = match.group(2)
+        
+        # Method 3: Try matching against collection titles
+        if not anime_name and collection_titles:
+            collection_match = _match_file_to_collection(file, collection_titles)
+            if collection_match:
+                anime_name, episode_num = collection_match
+                print(f"📎 Matched '{file}' to collection: {anime_name}")
+        
+        if not anime_name:
+            files_skipped.append(file)
             continue
 
+        # Sanitize folder name
+        folder_name = re.sub(r'[<>:"/\\|?*]', '_', anime_name)
+        
         # Create anime folder in the same directory as the file (in-place)
-        anime_folder = folder_path / anime_name
+        anime_folder = folder_path / folder_name
 
         if not anime_folder.exists():
             if dry_run:
@@ -157,7 +272,7 @@ def organize_anime(path: str, animepahe: bool = False, dry_run: bool = False):
             else:
                 anime_folder.mkdir(parents=True, exist_ok=True)
                 print("\n============================================================================")
-                print(f"\nCreated new folder '{anime_name}' at {folder_path}")
+                print(f"\nCreated new folder '{folder_name}' at {folder_path}")
 
         target_path = anime_folder / file
         
@@ -170,6 +285,13 @@ def organize_anime(path: str, animepahe: bool = False, dry_run: bool = False):
                 files_organized += 1
             except Exception as e:
                 print(f"\nError moving {file}: {e}")
+    
+    if files_skipped:
+        print(f"\n⚠️  Skipped {len(files_skipped)} files (couldn't match to any anime):")
+        for f in files_skipped[:10]:  # Show max 10
+            print(f"   - {f}")
+        if len(files_skipped) > 10:
+            print(f"   ... and {len(files_skipped) - 10} more")
     
     if not dry_run and files_organized > 0:
         print(f"\n✅ Organized {files_organized} files in {folder_path}")

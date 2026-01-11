@@ -29,15 +29,16 @@ def setup_session(retries=5):
 
 
 def _build_safe_filename(animename, ep=None, quality=None):
-    """Build a filesystem-safe filename like '22-Eighty-Six-720p.mp4'.
+    """Build a filesystem-safe filename like 'AnimePahe_Eighty_Six_22_720p.mp4'.
 
     This is based on the display name (animename), episode number, and quality
     so it stays stable regardless of whatever name the server suggests.
+    The AnimePahe_ prefix is required for pahesort to recognize and organize files.
     """
     base = (animename or "Anime").strip()
-    # Replace any non-alphanumeric sequence with a single dash
-    slug = re.sub(r"[^0-9A-Za-z]+", "-", base).strip("-")
-    slug = re.sub(r"-+", "-", slug) or "Anime"
+    # Replace any non-alphanumeric sequence with underscore for AnimePahe format
+    slug = re.sub(r"[^0-9A-Za-z]+", "_", base).strip("_")
+    slug = re.sub(r"_+", "_", slug) or "Anime"
 
     if ep is not None:
         try:
@@ -47,15 +48,17 @@ def _build_safe_filename(animename, ep=None, quality=None):
     else:
         episode_str = "00"
 
-    quality_str = "Unknown"
+    quality_str = "720p"
     if quality:
         q = str(quality).strip()
         if q.isdigit():
             quality_str = f"{q}p"
+        elif not q.endswith('p'):
+            quality_str = f"{q}p"
         else:
             quality_str = q
 
-    return f"{episode_str}-{slug}-{quality_str}.mp4"
+    return f"AnimePahe_{slug}_{episode_str}_{quality_str}.mp4"
 
 
 def download_with_retries(session, posturl, params, headers, filename, ep, chunk_size=1024 * 300, retries=5):

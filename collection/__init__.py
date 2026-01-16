@@ -8,7 +8,7 @@ A comprehensive anime collection management system with:
 - Collection statistics and analytics
 - Import/export functionality
 
-Author: AutoPahe Development Team
+Author: Haxsys
 Version: 3.4.0
 """
 

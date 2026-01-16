@@ -1283,7 +1283,10 @@ def command_main(args):
     except NameError:
         cfg = None
 
-    if cfg and cfg.get('download_dir'):
+    # Check for custom download directory from environment variable (Docker)
+    if os.getenv('AUTOPAHE_DOWNLOAD_DIR'):
+        DOWNLOADS = Path(os.getenv('AUTOPAHE_DOWNLOAD_DIR'))
+    elif cfg and cfg.get('download_dir'):
         DOWNLOADS = Path(cfg['download_dir'])
     
     # Configure resume manager

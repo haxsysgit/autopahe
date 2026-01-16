@@ -1,0 +1,25 @@
+version: '3.4'
+
+services:
+  autopahe:
+    build: .
+    image: autopahe:latest
+    container_name: autopahe
+    stdin_open: true
+    tty: true
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - AUTO_PAHE_DEV=1
+    volumes:
+      - ./data:/app/data
+      - ./json_data:/app/json_data
+      - ./collection:/app/collection
+      - ~/Downloads/autopahe:/app/downloads
+      # Uncomment and mount your .env file if needed
+      # - ./.env:/app/.env:ro
+    working_dir: /app
+    # Add any additional ports if needed
+    # ports:
+    #   - "8080:8080"
+    command: ["--help"]  # Default command, override when running

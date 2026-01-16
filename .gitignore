@@ -19,7 +19,5 @@ about.txt
 data/
 !data/.gitkeep
 
-# Legacy data directories
-json_data/
-animerecord.json
+
 FEATURE_SUGGESTIONS.txt

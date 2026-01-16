@@ -1,6 +1,6 @@
 [project]
 name = "autopahe"
-version = "3.4.4"
+version = "3.5.0"
 description = "Cross-platform anime downloader for AnimePahe with advanced features: smart caching, cross-platform streaming, notifications, filters, batch downloads, and record management"
 readme = "README.md"
 requires-python = ">=3.8"

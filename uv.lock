@@ -9,9 +9,10 @@ resolution-markers = [
 
 [[package]]
 name = "autopahe"
-version = "3.3.4"
+version = "3.5.0"
 source = { editable = "." }
 dependencies = [
+    { name = "beautifulsoup4" },
     { name = "colorama" },
     { name = "playwright", version = "1.48.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
     { name = "playwright", version = "1.55.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
@@ -40,12 +41,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "beautifulsoup4", specifier = ">=4.12.0" },
     { name = "build", marker = "extra == 'publish'", specifier = ">=1.2.0" },
     { name = "colorama", specifier = ">=0.4.6" },
     { name = "playwright", specifier = ">=1.45.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7.0" },
     { name = "requests", specifier = ">=2.31.0" },
-    { name = "rich", specifier = ">=14.2.0" },
+    { name = "rich", specifier = ">=13.0.0" },
     { name = "tqdm", specifier = ">=4.66.0" },
     { name = "twine", marker = "extra == 'publish'", specifier = ">=4.0.2" },
 ]
@@ -61,6 +63,21 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/86/72/cd9b395f25e290e633655a100af28cb253e4393396264a98bd5f5951d50f/backports_tarfile-1.2.0.tar.gz", hash = "sha256:d75e02c268746e1b8144c278978b6e98e85de6ad16f8e4b0844a154557eca991", size = 86406, upload-time = "2024-05-28T17:01:54.731Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b9/fa/123043af240e49752f1c4bd24da5053b6bd00cad78c2be53c0d1e8b975bc/backports.tarfile-1.2.0-py3-none-any.whl", hash = "sha256:77e284d754527b01fb1e6fa8a1afe577858ebe4e9dad8919e34c862cb399bc34", size = 30181, upload-time = "2024-05-28T17:01:53.112Z" },
+]
+
+[[package]]
+name = "beautifulsoup4"
+version = "4.14.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "soupsieve", version = "2.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "soupsieve", version = "2.8.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "typing-extensions", version = "4.13.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "typing-extensions", version = "4.14.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c3/b0/1c6a16426d389813b48d95e26898aff79abbde42ad353958ad95cc8c9b21/beautifulsoup4-4.14.3.tar.gz", hash = "sha256:6292b1c5186d356bba669ef9f7f051757099565ad9ada5dd630bd9de5fa7fb86", size = 627737, upload-time = "2025-11-30T15:08:26.084Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1a/39/47f9197bdd44df24d67ac8893641e16f386c984a0619ef2ee4c51fbbc019/beautifulsoup4-4.14.3-py3-none-any.whl", hash = "sha256:0918bfe44902e6ad8d57732ba310582e98da931428d231a5ecb9e7c703a735bb", size = 107721, upload-time = "2025-11-30T15:08:24.087Z" },
 ]
 
 [[package]]
@@ -1171,6 +1188,31 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/31/9f/11ef35cf1027c1339552ea7bfe6aaa74a8516d8b5caf6e7d338daf54fd80/secretstorage-3.4.0.tar.gz", hash = "sha256:c46e216d6815aff8a8a18706a2fbfd8d53fcbb0dce99301881687a1b0289ef7c", size = 19748, upload-time = "2025-09-09T16:42:13.859Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/91/ff/2e2eed29e02c14a5cb6c57f09b2d5b40e65d6cc71f45b52e0be295ccbc2f/secretstorage-3.4.0-py3-none-any.whl", hash = "sha256:0e3b6265c2c63509fb7415717607e4b2c9ab767b7f344a57473b779ca13bd02e", size = 15272, upload-time = "2025-09-09T16:42:12.744Z" },
+]
+
+[[package]]
+name = "soupsieve"
+version = "2.7"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version < '3.9'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3f/f4/4a80cd6ef364b2e8b65b15816a843c0980f7a5a2b4dc701fc574952aa19f/soupsieve-2.7.tar.gz", hash = "sha256:ad282f9b6926286d2ead4750552c8a6142bc4c783fd66b0293547c8fe6ae126a", size = 103418, upload-time = "2025-04-20T18:50:08.518Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e7/9c/0e6afc12c269578be5c0c1c9f4b49a8d32770a080260c333ac04cc1c832d/soupsieve-2.7-py3-none-any.whl", hash = "sha256:6e60cc5c1ffaf1cebcc12e8188320b72071e922c2e897f737cadce79ad5d30c4", size = 36677, upload-time = "2025-04-20T18:50:07.196Z" },
+]
+
+[[package]]
+name = "soupsieve"
+version = "2.8.3"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.10'",
+    "python_full_version == '3.9.*'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7b/ae/2d9c981590ed9999a0d91755b47fc74f74de286b0f5cee14c9269041e6c4/soupsieve-2.8.3.tar.gz", hash = "sha256:3267f1eeea4251fb42728b6dfb746edc9acaffc4a45b27e19450b676586e8349", size = 118627, upload-time = "2026-01-20T04:27:02.457Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/46/2c/1462b1d0a634697ae9e55b3cecdcb64788e8b7d63f54d923fcd0bb140aed/soupsieve-2.8.3-py3-none-any.whl", hash = "sha256:ed64f2ba4eebeab06cc4962affce381647455978ffc1e36bb79a545b91f45a95", size = 37016, upload-time = "2026-01-20T04:27:01.012Z" },
 ]
 
 [[package]]

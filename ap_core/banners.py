@@ -103,11 +103,13 @@ class Banners:
         print("        " + "-" * 60)
         print()
 
-    def success_message(message):
+    def success_message(message, compact=False):
         """Display success message in structured format"""
-        print()  # Add spacing before success message
+        if not compact:
+            print()  # Add spacing before success message
         print(f"        {Fore.GREEN}✅ {message}{Style.RESET_ALL}")
-        print()
+        if not compact:
+            print()
 
     def info_message(message):
         """Display info message in structured format"""

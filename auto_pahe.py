@@ -852,6 +852,7 @@ def stream_episode(arg=1, player="default", res="720", prefer_dub=False):
     Stream the specified episode by extracting the video URL and launching media player.
     """
     global page
+    log_prefix = "        "
     
     try:
         # Convert the argument to an integer to ensure it is in the correct format
@@ -866,13 +867,28 @@ def stream_episode(arg=1, player="default", res="720", prefer_dub=False):
         episode_session, episode_data = get_episode_session(session_id, arg)
         if not episode_session:
             total = jsonpage_dict.get('total', 'unknown') if jsonpage_dict else 'unknown'
-            print(f"\n❌ Episode {arg} not found. This anime has {total} episodes available.")
+            print(f"\n{log_prefix}❌ Episode {arg} not found. This anime has {total} episodes available.")
             return False
+
+        # Resolve player once so cached paths don't hit "default"
+        if player == "default":
+            detected_player = detect_available_player()
+            if not detected_player:
+                print(f"{log_prefix}❌ No media player found. Please install mpv, vlc, or mplayer.")
+                print(f"{log_prefix}💡 Installation commands:")
+                print(f"{log_prefix}   Ubuntu/Debian: sudo apt install mpv vlc")
+                print(f"{log_prefix}   macOS: brew install mpv vlc")
+                print(f"{log_prefix}   Windows: Download from mpv.io or videolan.org")
+                return False
+            
+            player = detected_player
+            print(f"{log_prefix}📺 Using detected player: {player}")
         
         # Check if we have cached play page data for this anime
         cached_anime = get_cached_anime_data(anime_id)
-        if cached_anime and 'play_links' in cached_anime:
-            print(f"        ⚡ Using cached streaming data for instant access")
+        cache_available = bool(cached_anime and 'play_links' in cached_anime)
+        if cache_available:
+            print(f"{log_prefix}⚡ Using cached streaming data for instant access")
             play_links = cached_anime['play_links']
             
             # Find the specific episode's play links
@@ -900,26 +916,26 @@ def stream_episode(arg=1, player="default", res="720", prefer_dub=False):
                 
                 if filtered_links:
                     kwik_url = filtered_links[0]  # Use highest resolution that meets criteria
-                    print(f"        🎯 Using cached kwik URL: {kwik_url}")
+                    print(f"{log_prefix}🎯 Using cached kwik URL: {kwik_url}")
                     
                     # Stream using cached URL
                     video_url, headers = kwik_stream(kwik_url, ep=arg, animename=animepicked)
                     if video_url:
-                        success = stream_video(video_url, headers, player)
+                        success = stream_video(video_url, headers, player, indent=log_prefix)
                         if success:
-                            print(f"        ✅ ✅ Episode {arg} streaming completed")
-                        return
+                            print(f"{log_prefix}✅ Episode {arg} streaming completed")
+                            return True
+                        print(f"{log_prefix}❌ Cached stream failed for episode {arg}, retrying from play page...")
                     else:
-                        print(f"        ❌ Streaming failed for episode {arg}: Could not extract video URL")
-                        return
+                        print(f"{log_prefix}❌ Cached link failed for episode {arg}, retrying from play page...")
                 else:
-                    print(f"        ❌ No cached links found for episode {arg} with resolution {res}p")
-                    return
+                    print(f"{log_prefix}❌ No cached links found for episode {arg} with resolution {res}p")
             else:
-                print(f"        ❌ Episode {arg} not found in cached streaming data")
-                return
+                print(f"{log_prefix}❌ Episode {arg} not found in cached streaming data")
+            
+            print(f"{log_prefix}🔄 Cached data incomplete, fetching from play page...")
         else:
-            print(f"        🔄 No cached streaming data, fetching from play page...")
+            print(f"{log_prefix}🔄 No cached streaming data, fetching from play page...")
         
         # Construct the API URL to get the download page for the selected episode
         api_url = f'https://animepahe.si/api?m=release&id={anime_id}&session={episode_session}'
@@ -1044,8 +1060,8 @@ def stream_episode(arg=1, player="default", res="720", prefer_dub=False):
         if not kwik:
             raise ValueError(f"No valid streaming link found for episode {arg}")
 
-        print(f"🎬 Preparing to stream episode {arg} of {animepicked}")
-        print(f"🔗 Extracted kwik URL: {kwik[:50]}..." if len(kwik) > 50 else f"🔗 Extracted kwik URL: {kwik}")
+        print(f"{log_prefix}🎬 Preparing to stream episode {arg} of {animepicked}")
+        print(f"{log_prefix}🔗 Extracted kwik URL: {kwik[:50]}..." if len(kwik) > 50 else f"{log_prefix}🔗 Extracted kwik URL: {kwik}")
         
         # Close the Playwright page before streaming
         try:
@@ -1053,37 +1069,23 @@ def stream_episode(arg=1, player="default", res="720", prefer_dub=False):
         except:
             pass
         
-        # Detect available player
-        if player == "default":
-            detected_player = detect_available_player()
-            if not detected_player:
-                print("❌ No media player found. Please install mpv, vlc, or mplayer.")
-                print("💡 Installation commands:")
-                print("   Ubuntu/Debian: sudo apt install mpv vlc")
-                print("   macOS: brew install mpv vlc")
-                print("   Windows: Download from mpv.io or videolan.org")
-                return False
-            
-            player = detected_player
-            print(f"📺 Using detected player: {player}")
-        
         # Extract video URL and stream
         video_url, headers = kwik_stream(url=kwik, ep=arg, animename=animepicked)
         
         if video_url:
-            success = stream_video(video_url, headers, player)
+            success = stream_video(video_url, headers, player, indent=log_prefix)
             if success:
-                Banners.success_message(f"✅ Episode {arg} streaming completed")
+                Banners.success_message(f"Episode {arg} streaming completed", compact=True)
                 return True
             else:
-                print(f"❌ Failed to stream episode {arg}")
+                print(f"{log_prefix}❌ Failed to stream episode {arg}")
                 return False
         else:
-            print(f"❌ Failed to extract video URL for episode {arg}")
+            print(f"{log_prefix}❌ Failed to extract video URL for episode {arg}")
             return False
             
     except Exception as e:
-        print(f"❌ Streaming failed for episode {arg}: {e}")
+        print(f"{log_prefix}❌ Streaming failed for episode {arg}: {e}")
         return False
 
 
@@ -1091,6 +1093,7 @@ def multi_stream(arg: str, player="default", resolution="720", prefer_dub=False)
     """
     Stream multiple episodes sequentially.
     """
+    log_prefix = "        "
     # Parse input like '2,3,5-7' into [2,3,5,6,7]
     eps = []
     for part in arg.split(','):
@@ -1111,7 +1114,7 @@ def multi_stream(arg: str, player="default", resolution="720", prefer_dub=False)
             success = stream_episode(arg=ep, player=player, res=resolution, prefer_dub=prefer_dub)
             if success:
                 completed += 1
-                Banners.success_message(f"Episode {ep} completed successfully ({completed}/{len(eps)})")
+                Banners.success_message(f"Episode {ep} completed successfully ({completed}/{len(eps)})", compact=True)
             else:
                 failed.append(ep)
                 logging.error(f"Episode {ep} failed to stream")
@@ -1121,9 +1124,9 @@ def multi_stream(arg: str, player="default", resolution="720", prefer_dub=False)
     
     # Report results
     if failed:
-        print(f"\n⚠️ Streaming completed with {len(failed)} failed episodes: {failed}")
+        print(f"\n{log_prefix}⚠️ Streaming completed with {len(failed)} failed episodes: {failed}")
     else:
-        print(f"\n✅ All {len(eps)} episodes streamed successfully!")
+        print(f"\n{log_prefix}✅ All {len(eps)} episodes streamed successfully!")
     
     return len(failed) == 0
 
@@ -1967,4 +1970,3 @@ def main():
 # If the script is executed directly, call the main function
 if __name__ == '__main__':
     main()
-

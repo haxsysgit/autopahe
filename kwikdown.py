@@ -437,27 +437,36 @@ def detect_available_player():
     return None
 
 
-def stream_video(video_url, headers=None, player="mpv"):
+def stream_video(video_url, headers=None, player="mpv", indent=""):
     """
     Launch media player to stream video from URL.
     """
     import subprocess
     import os
+    log_prefix = indent or ""
     
     if not video_url:
-        print("❌ No video URL available for streaming")
+        print(f"{log_prefix}❌ No video URL available for streaming")
         return False
     
+    if player == "default":
+        detected_player = detect_available_player()
+        if not detected_player:
+            print(f"{log_prefix}❌ No media player found. Please install mpv, vlc, or mplayer.")
+            return False
+        player = detected_player
+        print(f"{log_prefix}📺 Using detected player: {player}")
+
     if not shutil.which(player):
-        print(f"❌ Player '{player}' not found. Please install {player} or use --player to specify another.")
+        print(f"{log_prefix}❌ Player '{player}' not found. Please install {player} or use --player to specify another.")
         available = detect_available_player()
         if available:
-            print(f"💡 Available player found: {available}")
+            print(f"{log_prefix}💡 Available player found: {available}")
         return False
     
     try:
-        print(f"🎬 Launching {player} to stream video...")
-        print(f"📺 URL: {video_url[:100]}..." if len(video_url) > 100 else f"📺 URL: {video_url}")
+        print(f"{log_prefix}🎬 Launching {player} to stream video...")
+        print(f"{log_prefix}📺 URL: {video_url[:100]}..." if len(video_url) > 100 else f"{log_prefix}📺 URL: {video_url}")
         
         # Set environment variables for headers if provided
         env = os.environ.copy()
@@ -470,6 +479,7 @@ def stream_video(video_url, headers=None, player="mpv"):
         # Launch the player
         cmd = [player, video_url]
         if player == 'vlc':
+            cmd.append('--play-and-exit')
             cmd.extend(['--http-user-agent', headers.get('User-Agent', '') if headers else ''])
             cmd.extend(['--http-referrer', headers.get('Referer', '') if headers else ''])
         
@@ -477,8 +487,8 @@ def stream_video(video_url, headers=None, player="mpv"):
         return True
         
     except KeyboardInterrupt:
-        print("\n⏹️ Streaming stopped by user")
+        print(f"\n{log_prefix}⏹️ Streaming stopped by user")
         return True
     except Exception as e:
-        print(f"❌ Failed to launch player: {e}")
+        print(f"{log_prefix}❌ Failed to launch player: {e}")
         return False

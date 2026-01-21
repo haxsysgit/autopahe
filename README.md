@@ -77,6 +77,57 @@ autopahe -s "anime name" -i 0 -md 1-12
 autopahe -s "anime name" -i 0 -st 1
 ```
 
+### Core Command Examples
+
+**Search + Select**
+```bash
+# Basic search
+autopahe -s "one piece"
+
+# Search with filters
+autopahe -s "naruto" --year 2002 --status "Finished Airing"
+
+# Exact match only (disable fuzzy search)
+autopahe -s "jujutsu kaisen" --no-fuzzy
+```
+
+**Downloads**
+```bash
+# Single episode
+autopahe -s "demon slayer" -i 0 -d 1
+
+# Range and list formats
+autopahe -s "bleach" -i 0 -md 1-12
+autopahe -s "bleach" -i 0 -md "1,3,5-7"
+
+# Whole season shortcut (12 eps per season)
+autopahe -s "attack on titan" -i 0 --season 1
+```
+
+**Streaming**
+```bash
+# Single episode
+autopahe -s "spy x family" -i 0 -st 1
+
+# Multi-episode streaming
+autopahe -s "spy x family" -i 0 -st "1-5"
+
+# Streaming quality and player
+autopahe -s "spy x family" -i 0 -st 1 -p 1080 --player vlc
+```
+
+**Sorting & Organizing**
+```bash
+# Dry-run organize to see changes first
+autopahe --sort organize --sort-dry-run
+
+# Rename files in place
+autopahe --sort rename
+
+# Full sort (rename + organize) for a specific path
+autopahe --sort all --sort-path "/path/to/Downloads"
+```
+
 ### More Options
 ```bash
 # Different quality (360, 480, 720, 1080)
@@ -90,6 +141,14 @@ autopahe -s "anime name" -i 0 -d 1 --dub
 
 # Stream with specific player
 autopahe -s "anime name" -i 0 -st 1 --player vlc
+
+# Cache management
+autopahe --cache stats
+autopahe --cache clear
+
+# Resume interrupted downloads
+autopahe --resume
+autopahe --resume-stats
 ```
 
 ## ⚙️ Configuration

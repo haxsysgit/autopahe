@@ -5,17 +5,17 @@
 import os
 import sys
 import time
-import argparse
 import logging
 import atexit
 import subprocess
 from pathlib import Path
 import json
 import re
-import shlex
+from typing import Optional
 
 # Third-party imports
 import requests
+import typer
 from colorama import Fore, Style, init
 init()
 from rich.console import Console
@@ -60,7 +60,8 @@ from ap_core.resume_manager import resume_manager
 from collection import get_collection_manager, handle_collection_command, WatchStatus
 from ap_core.notifications import notify_download_complete, notify_download_failed
 # Cookie clearing functionality removed - handled by Playwright context
-from ap_core.config import load_app_config, write_sample_config, sample_config_text
+from ap_core.config import write_sample_config
+from state import AutoPaheState
 
 # Local imports - Features
 from kwikdown import kwik_download, kwik_stream, detect_available_player, stream_video, _build_safe_filename
@@ -95,15 +96,20 @@ logging.basicConfig(
     format='%(levelname)s: %(message)s'
 )
 
-# Global state variables - initialized once
-search_response_dict = {}
-jsonpage_dict = {}
-linkpahe = []
-page = None
-anime_id = None
-session_id = None
-animepicked = ""
-episode_page_format = None
+# Runtime state container (Typer ctx.obj is preferred; this is a safe fallback)
+_fallback_state = AutoPaheState()
+
+
+def get_runtime_state(ctx: Optional[typer.Context] = None) -> AutoPaheState:
+    """Return CLI runtime state from Typer context or fallback storage."""
+    if ctx is not None and isinstance(ctx.obj, AutoPaheState):
+        return ctx.obj
+
+    current_ctx = typer.get_current_context(silent=True)
+    if current_ctx is not None and isinstance(current_ctx.obj, AutoPaheState):
+        return current_ctx.obj
+
+    return _fallback_state
 
 # Cache dictionaries - combined for better memory management
 _cache_store = {
@@ -377,7 +383,9 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
         status_filter: Optional status string to filter results
         enable_fuzzy: Enable fuzzy search for typo tolerance (default: True)
     """
-    global search_response_dict, _from_cache
+    state = get_runtime_state()
+    search_response_dict = state.search_results if isinstance(state.search_results, dict) else {}
+    global _from_cache
     _from_cache = False
     
     # Apply fuzzy search preprocessing for better matching
@@ -407,6 +415,7 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
             try:
                 # Parse cached response and return immediately (INSTANT ACCESS)
                 search_response_dict = json.loads(search_response)
+                state.search_results = search_response_dict
                 print(f"        ✅ Parsed cached JSON successfully")
                 logging.debug(f"Found {len(search_response_dict.get('data', []))} cached results")
                 
@@ -466,6 +475,7 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
         # Parse response if we got one
         if search_response:
             search_response_dict = json.loads(search_response)
+            state.search_results = search_response_dict
             logging.debug(f"Found {len(search_response_dict.get('data', []))} results")
         else:
             # Step 3: Only use Playwright as last resort (slow, resource intensive)
@@ -475,6 +485,7 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
                 search_response = driver_output(api_url, driver=True, json=True, wait_time=5)
                 if search_response:
                     search_response_dict = search_response
+                    state.search_results = search_response_dict
                     # Cache the Playwright results as JSON bytes for future instant access
                     cache_set(api_url, json.dumps(search_response_dict).encode())
                     logging.debug(f"Playwright fallback succeeded and cached")
@@ -482,6 +493,7 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
                 else:
                     logging.error("All methods failed to retrieve search results")
                     search_response_dict = {'data': []}
+                    state.search_results = search_response_dict
 
     except (requests.exceptions.RequestException, Exception) as e:
         # Any error - try Playwright fallback once
@@ -490,11 +502,14 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
             search_response = driver_output(api_url, driver=True, json=True, wait_time=5)
             if search_response:
                 search_response_dict = search_response
+                state.search_results = search_response_dict
                 cache_set(api_url, json.dumps(search_response_dict).encode())
             else:
                 search_response_dict = {'data': []}
+                state.search_results = search_response_dict
         except Exception:
             search_response_dict = {'data': []}
+            state.search_results = search_response_dict
 
     # Check if results exist
     if not search_response_dict or 'data' not in search_response_dict or not search_response_dict['data']:
@@ -555,6 +570,7 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
     # Display results using structured design
     from_cache = '_from_cache' in globals() and _from_cache
     Banners.search_results(search_response_dict['data'], from_cache=from_cache)
+    state.search_results = search_response_dict
     
     return search_response_dict
 
@@ -572,19 +588,22 @@ def index(arg):
     """
     print("\n")  # Don't clear screen, just add spacing
 
-    global jsonpage_dict, session_id, animepicked, episode_page_format
+    state = get_runtime_state()
+    search_response_dict = state.search_results if isinstance(state.search_results, dict) else {}
 
     try:
         # Get anime data from search results
         anime_data = search_response_dict['data'][int(arg)]
         
         # Set global variables
-        animepicked = anime_data['title']
-        session_id = anime_data['session']
-        episode_page_format = f'https://animepahe.com/anime/{session_id}'
+        state.anime_name = anime_data['title']
+        state.session_id = anime_data['session']
+        state.anime_id = state.session_id
+        state.episode_page_format = f'https://animepahe.com/anime/{state.session_id}'
         
         # Fetch first page of episodes (for display). Additional pages fetched lazily on demand.
-        jsonpage_dict = fetch_episode_page(session_id, page_num=1, use_cache=True)
+        state.episode_page_data = fetch_episode_page(state.session_id, page_num=1, use_cache=True) or {}
+        jsonpage_dict = state.episode_page_data
         
         if not jsonpage_dict or 'data' not in jsonpage_dict:
             logging.error("Failed to fetch episode list. The server may be down or rate limiting requests.")
@@ -596,7 +615,7 @@ def index(arg):
                 'type': anime_data.get('type', 'N/A'),
                 'status': anime_data.get('status', 'N/A'),
                 'image': f"https://animepahe.si{anime_data.get('poster', '')}" if anime_data.get('poster') and not anime_data.get('poster', '').startswith('http') else anime_data.get('poster', 'No image available'),
-                'homepage': episode_page_format,
+                'homepage': state.episode_page_format,
                 'episode_count': 'N/A',
                 'first_episode': 'N/A',
                 'last_episode': 'N/A'
@@ -610,7 +629,7 @@ def index(arg):
                 'type': anime_data.get('type', 'N/A'),
                 'status': anime_data.get('status', 'N/A'),
                 'image': f"https://animepahe.si{anime_data.get('poster', '')}" if anime_data.get('poster') and not anime_data.get('poster', '').startswith('http') else anime_data.get('poster', 'No image available'),
-                'homepage': episode_page_format,
+                'homepage': state.episode_page_format,
                 'episode_count': len(jsonpage_dict.get('data', [])),
                 'first_episode': jsonpage_dict['data'][0]['episode'] if jsonpage_dict.get('data') else 'N/A',
                 'last_episode': jsonpage_dict['data'][-1]['episode'] if jsonpage_dict.get('data') else 'N/A'
@@ -634,11 +653,15 @@ def index(arg):
         return None
     except Exception as e:
         logging.error(f"Error in index function: {e}")
-        if 'search_response_dict' not in globals() or not search_response_dict:
+        if not search_response_dict:
             logging.error("No search results available. Please perform a search first.")
         return None
 
 def about():
+        state = get_runtime_state()
+        episode_page_format = state.episode_page_format
+        if not episode_page_format:
+            return ''
         # Prefer prefetched HTML if available
         html = _prefetched_pages.get(episode_page_format)
         if not html:
@@ -669,25 +692,27 @@ def download(arg=1, download_file=True, res = "720", prefer_dub=False):
     Download the specified episode by navigating with Playwright and extracting the download link.
     """
     
+    state = get_runtime_state()
     try:
         # Convert the argument to an integer to ensure it is in the correct format
         arg = int(arg)
 
         # Check if anime is selected
-        if not session_id:
+        if not state.session_id:
             logging.error("No anime selected. Please select an anime first.")
             return
         
         # Get episode session using lazy loading (fetches correct page on demand)
-        episode_session, episode_data = get_episode_session(session_id, arg)
+        episode_session, episode_data = get_episode_session(state.session_id, arg)
         if not episode_session:
             # get_episode_session already logs the error with total count
+            jsonpage_dict = state.episode_page_data
             total = jsonpage_dict.get('total', 'unknown') if jsonpage_dict else 'unknown'
             print(f"\n❌ Episode {arg} not found. This anime has {total} episodes available.")
             return
 
         # Construct the URL for the stream page for the specific episode using the session ID
-        stream_page_url = f'https://animepahe.com/play/{session_id}/{episode_session}'
+        stream_page_url = f'https://animepahe.com/play/{state.session_id}/{episode_session}'
 
         # Navigate with shared Playwright context (headless) and extract links then the kwik page
         browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or 'chrome').lower()
@@ -807,15 +832,15 @@ def download(arg=1, download_file=True, res = "720", prefer_dub=False):
 
     if download_file:
         # Show download progress using structured design
-        Banners.download_progress(animepicked, arg)
+        Banners.download_progress(state.anime_name or "Unknown Anime", arg)
 
         # Build a stable filename based on display title, episode and quality
-        safe_name = _build_safe_filename(animepicked, ep=arg, quality=res)
+        safe_name = _build_safe_filename(state.anime_name or "Unknown Anime", ep=arg, quality=res)
         episode_path = DOWNLOADS / safe_name
 
         # Add download to resume manager for tracking
         download_id = resume_manager.add_download(
-            anime_title=animepicked,
+            anime_title=state.anime_name or "Unknown Anime",
             episode_number=str(arg),
             download_url=kwik,
             file_path=str(episode_path),
@@ -823,7 +848,7 @@ def download(arg=1, download_file=True, res = "720", prefer_dub=False):
         )
 
         # Trigger the download process using the kwik link and specify the download directory
-        result = kwik_download(url=kwik, dpath=DOWNLOADS, ep=arg, animename=animepicked, quality=res)
+        result = kwik_download(url=kwik, dpath=DOWNLOADS, ep=arg, animename=state.anime_name or "Unknown Anime", quality=res)
         
         # Track download in collection manager
         if result is not False:  # kwik_download returns False on failure
@@ -832,10 +857,10 @@ def download(arg=1, download_file=True, res = "720", prefer_dub=False):
             
             # Add to collection manager (without organizing - --sort handles that)
             cm = get_collection_manager()
-            entry = cm.add_anime(animepicked)
+            entry = cm.add_anime(state.anime_name or "Unknown Anime")
             episode_file = str(episode_path)
-            cm.add_episode_file(animepicked, arg, episode_file, organize=False)
-            Banners.success_message(f"Added episode {arg} to collection for '{animepicked}'")
+            cm.add_episode_file(state.anime_name or "Unknown Anime", arg, episode_file, organize=False)
+            Banners.success_message(f"Added episode {arg} to collection for '{state.anime_name or 'Unknown Anime'}'")
         else:
             # Mark download as failed in resume manager
             resume_manager.mark_failed(download_id, "Download failed")
@@ -851,7 +876,7 @@ def stream_episode(arg=1, player="default", res="720", prefer_dub=False):
     """
     Stream the specified episode by extracting the video URL and launching media player.
     """
-    global page
+    state = get_runtime_state()
     log_prefix = "        "
     
     try:
@@ -859,13 +884,14 @@ def stream_episode(arg=1, player="default", res="720", prefer_dub=False):
         arg = int(arg)
 
         # Check if anime is selected
-        if not session_id:
+        if not state.session_id:
             logging.error("No anime selected. Please select an anime first.")
             return False
         
         # Get episode session using lazy loading (fetches correct page on demand)
-        episode_session, episode_data = get_episode_session(session_id, arg)
+        episode_session, episode_data = get_episode_session(state.session_id, arg)
         if not episode_session:
+            jsonpage_dict = state.episode_page_data
             total = jsonpage_dict.get('total', 'unknown') if jsonpage_dict else 'unknown'
             print(f"\n{log_prefix}❌ Episode {arg} not found. This anime has {total} episodes available.")
             return False
@@ -885,14 +911,14 @@ def stream_episode(arg=1, player="default", res="720", prefer_dub=False):
             print(f"{log_prefix}📺 Using detected player: {player}")
         
         # Check if we have cached play page data for this anime
-        cached_anime = get_cached_anime_data(anime_id)
+        cached_anime = get_cached_anime_data(state.anime_id)
         cache_available = bool(cached_anime and 'play_links' in cached_anime)
         if cache_available:
             print(f"{log_prefix}⚡ Using cached streaming data for instant access")
             play_links = cached_anime['play_links']
             
             # Find the specific episode's play links
-            episode_key = f"{anime_id}_{episode_session}"
+            episode_key = f"{state.anime_id}_{episode_session}"
             if episode_key in play_links:
                 dload_items = play_links[episode_key]
                 
@@ -919,7 +945,7 @@ def stream_episode(arg=1, player="default", res="720", prefer_dub=False):
                     print(f"{log_prefix}🎯 Using cached kwik URL: {kwik_url}")
                     
                     # Stream using cached URL
-                    video_url, headers = kwik_stream(kwik_url, ep=arg, animename=animepicked)
+                    video_url, headers = kwik_stream(kwik_url, ep=arg, animename=state.anime_name or "Unknown Anime")
                     if video_url:
                         success = stream_video(video_url, headers, player, indent=log_prefix)
                         if success:
@@ -938,10 +964,10 @@ def stream_episode(arg=1, player="default", res="720", prefer_dub=False):
             print(f"{log_prefix}🔄 No cached streaming data, fetching from play page...")
         
         # Construct the API URL to get the download page for the selected episode
-        api_url = f'https://animepahe.si/api?m=release&id={anime_id}&session={episode_session}'
+        api_url = f'https://animepahe.si/api?m=release&id={state.anime_id}&session={episode_session}'
         
         # Construct the URL for the stream page for the specific episode using the session ID
-        stream_page_url = f'https://animepahe.com/play/{anime_id}/{episode_session}'
+        stream_page_url = f'https://animepahe.com/play/{state.anime_id}/{episode_session}'
 
         # Navigate with shared Playwright context (headless) and extract links then the kwik page
         browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or 'chrome').lower()
@@ -975,20 +1001,20 @@ def stream_episode(arg=1, player="default", res="720", prefer_dub=False):
         
         # Cache the play page data for future instant access
         if dload_items:
-            episode_key = f"{anime_id}_{episode_session}"
-            cached_anime = get_cached_anime_data(anime_id)
+            episode_key = f"{state.anime_id}_{episode_session}"
+            cached_anime = get_cached_anime_data(state.anime_id)
             if cached_anime:
                 if 'play_links' not in cached_anime:
                     cached_anime['play_links'] = {}
                 cached_anime['play_links'][episode_key] = dload_items
-                cache_anime_data(anime_id, cached_anime['episode_data'], cached_anime['play_links'])
+                cache_anime_data(state.anime_id, cached_anime['episode_data'], cached_anime['play_links'])
                 logging.debug(f"Cached play page data for episode {arg}")
             else:
                 # Create new anime cache entry using current episode data
-                if 'jsonpage_dict' in globals() and jsonpage_dict:
-                    episode_data = jsonpage_dict
+                if state.episode_page_data:
+                    episode_data = state.episode_page_data
                     play_links = {episode_key: dload_items}
-                    cache_anime_data(anime_id, episode_data, play_links)
+                    cache_anime_data(state.anime_id, episode_data, play_links)
                     logging.debug(f"Created new anime cache entry for episode {arg}")
         
         # Debug: Log all found links
@@ -1060,7 +1086,7 @@ def stream_episode(arg=1, player="default", res="720", prefer_dub=False):
         if not kwik:
             raise ValueError(f"No valid streaming link found for episode {arg}")
 
-        print(f"{log_prefix}🎬 Preparing to stream episode {arg} of {animepicked}")
+        print(f"{log_prefix}🎬 Preparing to stream episode {arg} of {state.anime_name or 'Unknown Anime'}")
         print(f"{log_prefix}🔗 Extracted kwik URL: {kwik[:50]}..." if len(kwik) > 50 else f"{log_prefix}🔗 Extracted kwik URL: {kwik}")
         
         # Close the Playwright page before streaming
@@ -1070,7 +1096,7 @@ def stream_episode(arg=1, player="default", res="720", prefer_dub=False):
             pass
         
         # Extract video URL and stream
-        video_url, headers = kwik_stream(url=kwik, ep=arg, animename=animepicked)
+        video_url, headers = kwik_stream(url=kwik, ep=arg, animename=state.anime_name or "Unknown Anime")
         
         if video_url:
             success = stream_video(video_url, headers, player, indent=log_prefix)
@@ -1137,6 +1163,7 @@ def multi_download(arg: str, download_file=True, resolution="720", max_workers=1
     Note: Parallel downloads disabled due to Playwright threading incompatibility.
     Playwright's sync API uses greenlets which cannot be shared across ThreadPoolExecutor threads.
     """
+    state = get_runtime_state()
     # Force sequential downloads - Playwright is not thread-safe
     if max_workers > 1:
         Banners.info_message("⚠️ Parallel downloads disabled - Playwright requires sequential execution")
@@ -1169,9 +1196,9 @@ def multi_download(arg: str, download_file=True, resolution="720", max_workers=1
     # Send notification if enabled
     if enable_notifications and download_file:
         if failed:
-            notify_download_failed(animepicked, f"Failed: {', '.join(map(str, failed))}")
+            notify_download_failed(state.anime_name or "Unknown Anime", f"Failed: {', '.join(map(str, failed))}")
         else:
-            notify_download_complete(animepicked, arg)
+            notify_download_complete(state.anime_name or "Unknown Anime", arg)
 
 
 
@@ -1238,9 +1265,9 @@ def interactive_main():
         print("Invalid option selected.")
 
 
-def command_main(args):
-    global barg
-    barg = args.browser  # Selected browser
+def command_main(args, ctx: Optional[typer.Context] = None):
+    state = get_runtime_state(ctx)
+    search_response_dict = state.search_results if isinstance(state.search_results, dict) else {}
     records = []  # Initialize records list for tracking operations
     sarg = args.search  # Search query for anime
     iarg = args.index  # Index of selected anime
@@ -1402,6 +1429,8 @@ def command_main(args):
         if result is None:
             logging.error("Search failed. Exiting.")
             return
+        search_response_dict = result
+        state.search_results = search_response_dict
 
     # Index function
     if iarg is not None:
@@ -1412,13 +1441,12 @@ def command_main(args):
         # Prefetch episode JSON and anime page HTML using a shared Playwright context
         try:
             selected = search_response_dict['data'][iarg]
-            # Set globals required by downstream functions
-            global session_id, episode_page_format, animepicked, anime_id
-            animepicked = selected.get('title')
-            session_id = selected.get('session')
-            anime_id = session_id  # Set anime_id for streaming/download functions
-            episode_page_format = f'https://animepahe.com/anime/{session_id}'
-            anime_url_format = f'https://animepahe.com/api?m=release&id={session_id}&sort=episode_asc&page=1'
+            # Set runtime state required by downstream functions
+            state.anime_name = selected.get('title')
+            state.session_id = selected.get('session')
+            state.anime_id = state.session_id
+            state.episode_page_format = f'https://animepahe.com/anime/{state.session_id}'
+            anime_url_format = f'https://animepahe.com/api?m=release&id={state.session_id}&sort=episode_asc&page=1'
 
             # Prefetch JSON (episodes) - check both memory and disk cache
             if anime_url_format not in _episode_cache:
@@ -1454,7 +1482,8 @@ def command_main(args):
 
         # Now render index using the prefetched caches (no extra browser work)
         index_result = index(iarg)
-        search_response_dict["data"][iarg]["anime_page"] = episode_page_format
+        search_response_dict["data"][iarg]["anime_page"] = state.episode_page_format
+        state.search_results = search_response_dict
         records.append(search_response_dict['data'][iarg])
         process_record(records, quiet=True)
 
@@ -1464,7 +1493,7 @@ def command_main(args):
         if info:
             # Don't print the records list, just process it silently
             process_record(records, update=True, quiet=True)
-            Banners.anime_info(animepicked, info)
+            Banners.anime_info(state.anime_name or "Unknown Anime", info)
         else:
             logging.error("Could not fetch anime information.")
 
@@ -1479,8 +1508,8 @@ def command_main(args):
         did_download = True
 
     if starg:
-        if iarg is None:
-            print("❌ Error: Streaming requires anime selection.")
+        if iarg is None and not state.session_id:
+            print("❌ Error: Streaming requires anime selection. Use -s and -i first.")
             print("💡 Please use -i INDEX to select an anime before streaming.")
             print("   Example: autopahe -s 'anime name' -i 0 -st 1")
             return
@@ -1623,349 +1652,14 @@ def command_main(args):
     # Clean up browser after all operations are complete
     cleanup_browsers()
 
-# Main entry point for the script that processes arguments and triggers the appropriate actions
-def main():
-    # Record the start time of the execution
-    start_time = time.perf_counter()
-
-    # Pre-parse config flags
-    pre = argparse.ArgumentParser(add_help=False)
-    pre.add_argument('--config', help='Path to a config INI file')
-    pre.add_argument('--write-config', nargs='?', const='', help='Write a sample config to the given path (or default) and exit')
-    pre_args, remaining = pre.parse_known_args()
-
-    # Load configuration
-    cfg, cfg_path, cfg_warnings = load_app_config(pre_args.config)
-    for w in (cfg_warnings or []):
-        try:
-            print(f"WARNING: {w}", file=sys.stderr)
-        except Exception:
-            pass
-
-    # Handle write-config
-    if pre_args.write_config is not None:
-        from ap_core.platform_paths import get_config_dir
-        default_path = str(get_config_dir() / 'config.ini')
-        target = pre_args.write_config or default_path
-        written = write_sample_config(target)
-        print(f"Sample config written to: {written}")
-        return
-
-    if remaining and str(remaining[0]) == 'config':
-        sub = str(remaining[1]) if len(remaining) >= 2 else 'edit'
-        extra = [str(x) for x in (remaining[2:] if len(remaining) >= 3 else [])]
-
-        from ap_core.platform_paths import get_config_dir
-        default_path = get_config_dir() / 'config.ini'
-        if pre_args.config:
-            target_path = Path(pre_args.config).expanduser()
-        elif cfg_path:
-            target_path = Path(cfg_path)
-        else:
-            target_path = default_path
-
-        if sub in {'edit', ''}:
-            if extra and extra[0] in {'show', 'print'}:
-                try:
-                    if target_path.exists():
-                        print(target_path.read_text(encoding='utf-8'))
-                    else:
-                        print(sample_config_text())
-                except Exception as e:
-                    print(f"ERROR: Failed to read config: {e}", file=sys.stderr)
-                return
-
-            if extra and extra[0] in {'validate', 'check'}:
-                cfg2, cfg2_path, warns2 = load_app_config(str(target_path) if target_path else None)
-                if cfg2_path:
-                    print(f"Config file: {cfg2_path}")
-                else:
-                    print("Config file: (none found; using defaults)")
-                for w in (warns2 or []):
-                    print(f"WARNING: {w}", file=sys.stderr)
-                for k in sorted(cfg2.keys()):
-                    print(f"{k} = {cfg2[k]}")
-                return
-
-            try:
-                if not target_path.exists():
-                    write_sample_config(str(target_path))
-                
-                # Get platform-appropriate editor
-                from ap_core.platform_paths import is_windows
-                if is_windows():
-                    # On Windows, use notepad or EDITOR env var
-                    editor = os.environ.get('EDITOR') or 'notepad'
-                else:
-                    # On Unix, use EDITOR env var or vi
-                    editor = os.environ.get('EDITOR') or 'vi'
-                
-                # On Windows, don't use shlex.split for notepad
-                if is_windows() and editor.lower() == 'notepad':
-                    subprocess.call([editor, str(target_path)])
-                else:
-                    subprocess.call(shlex.split(editor) + [str(target_path)])
-            except Exception as e:
-                print(f"ERROR: Failed to open editor: {e}", file=sys.stderr)
-                print(f"Config file location: {target_path}", file=sys.stderr)
-                print("You can manually edit this file with any text editor.", file=sys.stderr)
-            return
-
-        if sub in {'show'}:
-            try:
-                if target_path.exists():
-                    print(target_path.read_text(encoding='utf-8'))
-                else:
-                    print(sample_config_text())
-            except Exception as e:
-                print(f"ERROR: Failed to read config: {e}", file=sys.stderr)
-            return
-
-        if sub in {'validate', 'check'}:
-            cfg2, cfg2_path, warns2 = load_app_config(str(target_path) if target_path else None)
-            if cfg2_path:
-                print(f"Config file: {cfg2_path}")
-            else:
-                print("Config file: (none found; using defaults)")
-            for w in (warns2 or []):
-                print(f"WARNING: {w}", file=sys.stderr)
-            for k in sorted(cfg2.keys()):
-                print(f"{k} = {cfg2[k]}")
-            return
-
-        print("ERROR: Unknown config subcommand. Use: autopahe config edit|show|validate", file=sys.stderr)
-        return
-
-    # Stash config globally for command_main
-    global APP_CONFIG
-    APP_CONFIG = cfg
-
-    # Set default browser from config or environment
-    default_browser = cfg.get('browser', 'chrome')  # Config takes precedence over env
-    # Only use env if no config setting
-    if not cfg.get('browser') and os.environ.get('AUTOPAHE_BROWSER'):
-        default_browser = os.environ.get('AUTOPAHE_BROWSER')
-    
-    # Argument parser setup to handle command-line inputs
-    parser = argparse.ArgumentParser(description='AutoPahe - Anime downloader with advanced features')
-    parser.add_argument('-v', '--version', action='store_true', help='Display AutoPahe version and exit')
-    parser.add_argument('-b', '--browser', default=default_browser, 
-                      choices=['chrome', 'chromium', 'firefox'],
-                      help=f'Select Playwright browser (default: {default_browser})')
-    parser.add_argument('-s', '--search', type=str, help='Search for an anime by name')
-    parser.add_argument('-i', '--index', type=int, help='Specify the index of the desired anime from the search results')
-    parser.add_argument('-d', '--single_download', type=int, help='Download a single episode of an anime')
-    parser.add_argument('-md', '--multi_download', help='Download multiple episodes of an anime (e.g., 1-12)')
-    parser.add_argument('-st', '--stream', help='Stream episode instead of downloading (e.g., 1 or 1-3)')
-    parser.add_argument('--player', choices=['mpv', 'vlc', 'mplayer', 'default'], 
-                      default='default', help='Media player for streaming (default: auto-detect)')
-    parser.add_argument('-l', '--link', help='Display the link to the kwik download page')
-    parser.add_argument('-ml', '--multilinks', help='Display multiple links to the kwik download pages')
-    parser.add_argument('-a', '--about', help='Output an overview of the anime', action='store_true')
-    parser.add_argument('-p', '--resolution', type=str, 
-                      default=str(cfg.get('resolution', '720')), 
-                      choices=['360', '480', '720', '1080', 'best', 'worst'],
-                      help='Video resolution for downloads (default: 720)')
-    parser.add_argument('-w', '--workers', type=int, 
-                      default=int(cfg.get('workers', '1')), 
-                      help='Number of parallel workers for multi-episode downloads (use >1 with caution)')
-    
-    # Records management
-    parser.add_argument('-r', '--record', help='Interact with the records/database (view, [index], [keyword])')
-    parser.add_argument('-R', '--records', nargs='+', 
-                      help='Robust records management. Examples: -R view | -R search naruto | -R delete 3 | -R progress 3 27 | -R rate 3 8.5 | -R rename 3 "New Title" | -R set-keyword 3 naruto | -R list-status completed | -R export out.json json | -R import in.json')
-    
-    # File organization
-    parser.add_argument('--sort', choices=['all', 'rename', 'organize'], 
-                      help='Sort downloaded files (integrates pahesort)')
-    parser.add_argument('--sort-path', help='Path to sort; defaults to Downloads')
-    parser.add_argument('--sort-dry-run', action='store_true', help='Dry-run sorting (no changes)')
-    
-    # Additional features
-    parser.add_argument('--summary', help='Show execution stats and records summary')
-    parser.add_argument('--year', type=int, help='Filter search results by year (e.g., 2020)')
-    parser.add_argument('--status', type=str, help='Filter search results by status (e.g., "Finished Airing")')
-    parser.add_argument('--season', type=int, help='Download entire season (12-13 eps). Example: --season 1 downloads eps 1-12')
-    parser.add_argument('--notify', action='store_true', help='Enable desktop notifications on download complete/fail')
-    parser.add_argument('--dub', action='store_true', help='Prefer English dubbed versions (default: subbed)')
-    parser.add_argument('--cache', choices=['clear', 'stats'], help='Cache management: clear (remove all) or stats (show info)')
-    parser.add_argument('--setup', action='store_true', help='Initial setup: write config and install browser')
-    
-    # Smart Search Features
-    parser.add_argument('--no-fuzzy', action='store_true', 
-                      help='Disable fuzzy search (exact match only)')
-    parser.add_argument('--fuzzy-threshold', type=float, default=0.6, 
-                      help='Fuzzy search similarity threshold (0.0-1.0, default: 0.6)')
-    
-    # Resume System Features
-    parser.add_argument('--resume', action='store_true',
-                      help='Resume interrupted downloads from previous session')
-    parser.add_argument('--resume-stats', action='store_true',
-                      help='Show download resume statistics')
-    parser.add_argument('--max-retries', type=int, default=3,
-                      help='Maximum retry attempts for failed downloads (default: 3)')
-    
-    # Collection Manager Features
-    parser.add_argument('--collection', nargs='*', 
-                      help='Collection management: stats | view | show <title> | episodes <title> | search <query> | organize | duplicates | export <path> | import <path>')
-    parser.add_argument('--collection-path', type=str,
-                      help='Path for collection operations (export/import file path)')
-    parser.add_argument('--watch-status', choices=['watching', 'completed', 'on_hold', 'dropped', 'plan_to_watch'],
-                      help='Update watch status for an anime (use with -s and -i)')
-    parser.add_argument('--watch-progress', type=int,
-                      help='Update watch progress (episodes watched) for an anime')
-    parser.add_argument('--rate', type=int, choices=range(1, 11), metavar='[1-10]',
-                      help='Rate an anime (1-10, use with -s and -i)')
-    
-    # Verbosity flags
-    parser.add_argument('--verbose', action='store_true', help='Enable verbose logging (DEBUG level)')
-    parser.add_argument('--quiet', action='store_true', help='Minimal logging (WARNING level only)')
-    
-    # Repeat config flags for help
-    parser.add_argument('--config', help='Path to a config INI file')
-    parser.add_argument('--write-config', nargs='?', const='', help='Write a sample config to the given path (or default) and exit')
-    
-    # Adding help message for exec_data
-    parser.add_argument(
-        '-dt', '--execution_data',
-        help=(
-            "Retrieve execution data for a specific date or date range. "
-            "Format : YYYY-MM-DD (year-month-day)"
-            "Examples: ['today', 'yesterday', 'last 3 days', 'last week', "
-            "'this week', '2 weeks ago', 'last month', '1 month ago'.]"
-        )
-    )
-
-    # Parse the command-line arguments
-    args = parser.parse_args(remaining)
-
-    # Handle version argument
-    if args.version:
-        print(f"AutoPahe v{AUTOPAHE_VERSION}")
-        print("⚡ Anime Downloader with Advanced Features ⚡")
-        return
-
-
-    # Set browser env after final parse
-    try:
-        os.environ['AUTOPAHE_BROWSER'] = (args.browser or default_browser)
-    except Exception:
-        pass
-
-    # One-shot setup
-    if getattr(args, 'setup', False):
-        setup_environment()
-        return
-    
-    # Configure logging level based on --verbose/--quiet
-    # Default to ERROR level to suppress WARNING messages for clean user output
-    if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
-        logging.debug("Verbose logging enabled")
-        # Show config details in verbose mode
-        if cfg_path:
-            logging.debug(f"Config loaded from: {cfg_path}")
-        else:
-            logging.debug("No config file found, using defaults")
-        logging.debug(f"Config values: browser={cfg.get('browser')}, resolution={cfg.get('resolution')}, workers={cfg.get('workers')}")
-        logging.debug(f"Effective resolution: {args.resolution}")
-    else:
-        # Default: ERROR level (only errors) - completely clean user output
-        logging.getLogger().setLevel(logging.ERROR)
-
-    # AUTOPAHE_BROWSER already set above from args/defaults
-
-    # Determine if the user provided any actionable flags (ignore defaults)
-    has_action = any([
-        bool(args.search),
-        args.index is not None,
-        args.single_download is not None,
-        bool(args.multi_download),
-        bool(args.stream),  # Add streaming argument
-        bool(args.link),
-        bool(args.multilinks),
-        bool(args.about),
-        bool(args.record),
-        bool(args.records),
-        bool(args.sort),
-        bool(args.sort_path),
-        bool(args.sort_dry_run),
-        bool(args.cache),
-        bool(args.summary),
-        args.year is not None,
-        bool(args.status),
-        args.season is not None,
-        bool(args.notify),
-        bool(args.execution_data),
-        bool(args.config),
-        args.write_config is not None,
-        # New feature flags
-        bool(args.resume),
-        bool(args.resume_stats),
-        args.collection is not None,
-        bool(args.watch_status),
-        args.watch_progress is not None,
-        args.rate is not None,
-    ])
-
-    # If actionable flags are provided, process them; otherwise go interactive
-    if has_action:
-        try:
-            Banners.header()
-        except Exception:
-            pass
-        command_main(args)
-    else:
-        try:
-            os.system('cls' if os.name == 'nt' else 'clear')
-        except Exception:
-            pass
-        try:
-            Banners.header()
-        except Exception:
-            pass
-        print("\nNo arguments provided. Try these options:\n")
-        print("  📺 BASIC OPERATIONS:")
-        print("  -s, --search <query>          Search for anime (typos auto-corrected!)")
-        print("  -i, --index <n>               Select anime index from search results")
-        print("  -d, --single_download <ep>    Download a single episode")
-        print("  -md, --multi_download <spec>  Download multiple episodes (e.g., 1-5 or 1,3,5)")
-        print("  -a, --about                   Show anime overview")
-        print("  -p, --resolution <720|1080>   Choose resolution")
-        print("  -w, --workers <n>             Parallel downloads (use >1 with caution)")
-        
-        print("\n  🎯 SMART FEATURES (NEW!):")
-        print("      --no-fuzzy                Disable fuzzy search (exact match only)")
-        print("      --resume                  Resume interrupted downloads")
-        print("      --resume-stats            Show download resume statistics")
-        print("      --collection stats        View your anime collection statistics")
-        print("      --collection organize     Organize collection files into folders")
-        print("      --collection duplicates   Find and remove duplicate files")
-        print("      --watch-status <status>   Update watch status (watching/completed/etc)")
-        print("      --rate <1-10>             Rate an anime")
-        
-        print("\n  🔧 MANAGEMENT:")
-        print("  -R, --records [...]           Manage records (view/search/delete/...)")
-        print("      --sort [all|rename|organize]  Sort downloaded files")
-        print("      --cache [clear|stats]     Manage cache and cookies")
-        print("      --year <YYYY>             Filter by year")
-        print("      --status <text>           Filter by status (e.g., Finished Airing)")
-        print("      --season <n>              Download a whole season (12-13 eps)")
-        print("      --notify                  Enable desktop notifications")
-        print("      --verbose | --quiet       Adjust logging verbosity\n")
-        print("Launching Interactive Mode...\n")
-        interactive_main()
-
-    # Display execution time for performance monitoring
-    elapsed = time.perf_counter() - start_time
-    if elapsed > 0.5:  # Only show for non-trivial operations
-        logging.debug(f"Execution completed in {elapsed:.2f} seconds")
-
-
-
-
-
 #================================================================ End of Arguments Handling =======================================================
+
+
+def main():
+    from cli import run
+
+    run()
+
 
 # If the script is executed directly, call the main function
 if __name__ == '__main__':

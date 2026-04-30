@@ -64,7 +64,7 @@ def main():
         )
         if success:
             success = run_command(
-                ["uv", "run", "playwright", "install", "--with-deps"],
+                ["uv", "run", "playwright", "install", "chromium"],
                 "Installing Playwright browsers"
             )
     else:
@@ -88,7 +88,7 @@ def main():
         
         if success:
             success = run_command(
-                [sys.executable, "-m", "playwright", "install", "--with-deps"],
+                [sys.executable, "-m", "playwright", "install", "chromium"],
                 "Installing Playwright browsers"
             )
     
@@ -114,7 +114,7 @@ def main():
         else:
             print("      pip install -r requirements.txt")
         print("   2. Install Playwright browsers:")
-        print("      playwright install --with-deps")
+        print("      playwright install chromium")
         print()
         print("For additional help, visit:")
         print("   https://github.com/haxsysgit/autopahe/issues")

@@ -37,64 +37,98 @@ _pw = None
 _pw_context = None
 _driver_cache = {}
 
-def install_playwright_browsers():
-    """Install Playwright browsers automatically."""
-    # Check if auto-install is disabled
+
+def _run_playwright_install(args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "playwright", "install", *args],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+
+def install_playwright_browser(browser: str = "chromium") -> bool:
+    """Install a Playwright browser engine in the active Python environment."""
     if os.environ.get("AUTOPAHE_SKIP_AUTO_INSTALL", "").lower() in ("1", "true", "yes"):
         print("⚠️  Auto-install disabled via AUTOPAHE_SKIP_AUTO_INSTALL")
         return False
-        
-    print("🔧 Playwright browsers not found. Installing automatically...")
-    print("This may take a few minutes on first run...")
-    
+
+    browser = (browser or "chromium").lower()
+    if browser in {"chrome", "msedge", "edge"}:
+        print(f"Using bundled Chromium for setup instead of external browser channel: {browser}")
+        browser = "chromium"
+    elif browser not in {"chromium", "firefox", "webkit"}:
+        print(f"Unknown browser '{browser}', using Chromium.")
+        browser = "chromium"
+
+    print(f"🔧 Installing Playwright {browser} browser engine...")
+
     try:
-        # Check available disk space (need ~500MB for browsers)
-        try:
-            home_dir = Path.home()
-            if hasattr(os, 'statvfs'):  # Unix-like systems
-                stat = os.statvfs(home_dir)
-                free_space_mb = (stat.f_bavail * stat.f_frsize) // (1024 * 1024)
-            else:  # Windows
-                import shutil
-                free_space_mb = shutil.disk_usage(home_dir).free // (1024 * 1024)
-            
-            if free_space_mb < 500:
-                print(f"❌ Insufficient disk space: {free_space_mb}MB available, need ~500MB")
-                return False
-        except Exception as space_error:
-            # If we can't check disk space, continue anyway and let the install fail if needed
-            logging.warning(f"Could not check disk space: {space_error}")
-            
-        # Try to install browsers using the same Python executable
-        result = subprocess.run([
-            sys.executable, "-m", "playwright", "install", "--with-deps"
-        ], capture_output=True, text=True, timeout=300)
-        
+        result = _run_playwright_install([browser])
         if result.returncode == 0:
-            print("✅ Playwright browsers installed successfully!")
+            print(f"✅ Playwright {browser} browser engine installed successfully.")
             return True
+
+        print(result.stderr.strip() or result.stdout.strip())
+        if sys.platform.startswith("linux"):
+            print("\nBrowser engine install failed. If the error mentions missing system libraries, run:")
+            print(f"   {sys.executable} -m playwright install-deps {browser}")
+            print(f"   {sys.executable} -m playwright install {browser}")
         else:
-            error_msg = result.stderr.lower()
-            if "permission" in error_msg or "access denied" in error_msg:
-                print("❌ Permission denied during installation.")
-                print("   Try running with appropriate privileges or check install directory permissions.")
-            elif "network" in error_msg or "connection" in error_msg:
-                print("❌ Network connection failed during installation.")
-                print("   Check your internet connection and try again.")
-            else:
-                print(f"❌ Failed to install Playwright browsers: {result.stderr}")
-            return False
-            
+            print("\nManual fallback:")
+            print(f"   {sys.executable} -m playwright install {browser}")
+        return False
+
     except subprocess.TimeoutExpired:
-        print("❌ Installation timed out. Please run 'playwright install' manually.")
+        print("❌ Playwright browser installation timed out.")
         return False
-    except PermissionError:
-        print("❌ Permission denied during installation.")
-        print("   Try running with appropriate privileges or check install directory permissions.")
+    except Exception as exc:
+        print(f"❌ Playwright browser installation failed: {exc}")
         return False
-    except Exception as e:
-        print(f"❌ Failed to install Playwright browsers: {e}")
+
+def install_playwright_browsers():
+    """Install Playwright browsers automatically."""
+    return install_playwright_browser("chromium")
+
+
+def open_verification_session(url: str, browser_choice: str = None) -> bool:
+    """Open a headed persistent browser session so the user can complete site verification."""
+    if not url:
+        url = "https://kwik.cx"
+    if "://" not in url:
+        url = f"https://{url}"
+
+    browser = (browser_choice or os.environ.get("AUTOPAHE_BROWSER") or "chromium").lower()
+    print("Opening AutoPahe's persistent browser profile.")
+    print("Complete any verification in the browser window, then return here.")
+    print(f"URL: {url}")
+
+    close_pw_context()
+    context = get_pw_context(browser, headless=False)
+    if context is None:
         return False
+
+    page = None
+    try:
+        page = context.new_page()
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        if sys.stdin.isatty():
+            input("Press Enter after verification is complete...")
+        else:
+            print("Non-interactive terminal detected; keeping the browser open for 60 seconds.")
+            page.wait_for_timeout(60000)
+        print("Verification session saved to the persistent browser profile.")
+        return True
+    except Exception as exc:
+        print(f"Verification session failed: {exc}")
+        return False
+    finally:
+        try:
+            if page is not None:
+                page.close()
+        except Exception:
+            pass
+        close_pw_context()
 
 
 def _run_interactive_setup():
@@ -109,14 +143,7 @@ def _run_interactive_setup():
         # Install Chromium engine (smallest, most universal for automation)
         print("Installing Playwright's Chromium engine...")
         os.environ['AUTOPAHE_BROWSER'] = 'chromium'
-        result = subprocess.run(
-            [sys.executable, '-m', 'playwright', 'install', 'chromium'],
-            capture_output=False,
-            timeout=300
-        )
-        
-        if result.returncode == 0:
-            print("\n✅ Chromium browser engine installed successfully!")
+        if install_playwright_browser("chromium"):
             return True
         
         # If Chromium fails, offer user choice
@@ -171,7 +198,7 @@ def get_pw_context(browser_choice: str = None, headless: bool = True):
             return None
         
         _pw = sync_playwright().start()
-        choice = (browser_choice or os.environ.get("AUTOPAHE_BROWSER") or "chrome").lower()
+        choice = (browser_choice or os.environ.get("AUTOPAHE_BROWSER") or "chromium").lower()
         # Normalize edge alias
         if choice == "edge":
             choice = "msedge"
@@ -332,7 +359,7 @@ def driver_output(url: str, driver=False, content=False, json=False, wait_time=5
         json: If True, return parsed JSON (or fallback parse).
         wait_time: Seconds to wait after initial load.
 
-    Uses the AUTOPAHE_BROWSER env var to choose 'chrome' (default), 'chromium', or 'firefox'.
+    Uses the AUTOPAHE_BROWSER env var to choose 'chromium' (default), 'chrome', or 'firefox'.
     """
     if not driver:
         logging.error("Invalid arguments provided to driver_output function.")
@@ -344,7 +371,7 @@ def driver_output(url: str, driver=False, content=False, json=False, wait_time=5
         key = (url, 'content' if content else 'json' if json else 'text')
         if key in _driver_cache:
             return _driver_cache[key]
-        browser_choice = (os.environ.get("AUTOPAHE_BROWSER") or "chrome").lower()
+        browser_choice = (os.environ.get("AUTOPAHE_BROWSER") or "chromium").lower()
         headless = True
         context = get_pw_context(browser_choice, headless=headless)
         if context is None:
@@ -391,7 +418,7 @@ def batch_driver_output(urls, content=False, json=False, wait_time=5):
         dict mapping url -> result (str for content, dict for json). Missing entries map to None.
     """
     results = {}
-    browser_choice = (os.environ.get("AUTOPAHE_BROWSER") or "chrome").lower()
+    browser_choice = (os.environ.get("AUTOPAHE_BROWSER") or "chromium").lower()
     context = get_pw_context(browser_choice, headless=True)
     if context is None:
         for u in urls:

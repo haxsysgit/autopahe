@@ -211,6 +211,7 @@ def cli_main(
     cache: Optional[str] = typer.Option(None, "--cache", help="Cache management: clear (remove all) or stats (show info)"),
     setup: bool = typer.Option(False, "--setup", help="Initial setup: write config and install browser"),
     update: bool = typer.Option(False, "--update", help="Update AutoPahe and refresh dependencies"),
+    verify_browser: Optional[str] = typer.Option(None, "--verify-browser", help="Open a URL in AutoPahe's persistent browser profile for manual verification"),
     no_fuzzy: bool = typer.Option(False, "--no-fuzzy", help="Disable fuzzy search (exact match only)"),
     fuzzy_threshold: float = typer.Option(0.6, "--fuzzy-threshold", help="Fuzzy search similarity threshold (0.0-1.0, default: 0.6)"),
     resume: bool = typer.Option(False, "--resume", help="Resume interrupted downloads from previous session"),
@@ -254,7 +255,7 @@ def cli_main(
 
     core.APP_CONFIG = cfg
 
-    default_browser = cfg.get("browser", "chrome")
+    default_browser = cfg.get("browser", "chromium")
     if not cfg.get("browser") and os.environ.get("AUTOPAHE_BROWSER"):
         default_browser = os.environ.get("AUTOPAHE_BROWSER")
 
@@ -280,6 +281,11 @@ def cli_main(
         from ap_core.updater import self_update
 
         raise typer.Exit(self_update())
+
+    if verify_browser:
+        from ap_core.browser import open_verification_session
+
+        raise typer.Exit(0 if open_verification_session(verify_browser, effective_browser) else 1)
 
     if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -328,6 +334,7 @@ def cli_main(
         cache=cache,
         setup=setup,
         update=update,
+        verify_browser=verify_browser,
         no_fuzzy=no_fuzzy,
         fuzzy_threshold=fuzzy_threshold,
         resume=resume,
@@ -362,6 +369,7 @@ def cli_main(
             bool(args.sort_dry_run),
             bool(args.cache),
             bool(args.update),
+            bool(args.verify_browser),
             bool(args.summary),
             args.year is not None,
             bool(args.status),
@@ -415,6 +423,7 @@ def cli_main(
         print("      --sort [all|rename|organize]  Sort downloaded files")
         print("      --cache [clear|stats]     Manage cache and cookies")
         print("      --update                  Update AutoPahe and refresh dependencies")
+        print("      --verify-browser <url>    Open persistent browser profile for verification")
         print("      --year <YYYY>             Filter by year")
         print("      --status <text>           Filter by status (e.g., Finished Airing)")
         print("      --season <n>              Download a whole season (12-13 eps)")

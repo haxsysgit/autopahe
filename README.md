@@ -19,6 +19,8 @@ uv tool install autopahe
 autopahe --setup
 ```
 
+`--setup` writes the default config and installs Playwright's bundled Chromium engine in the same environment AutoPahe uses.
+
 **From source:**
 ```bash
 git clone https://github.com/haxsysgit/autopahe.git
@@ -120,6 +122,13 @@ autopahe -s "attack on titan" -i 0 --season 1
 ```
 
 Kwik requires a regular browser for downloads. `-d` and `-md` guide you through opening the generated link and only mark an episode downloaded after a local video file is verified. Use `-l` when you only want the link without record updates.
+
+If a site asks for browser verification, you can complete it in AutoPahe's persistent browser profile:
+```bash
+autopahe --verify-browser https://kwik.cx
+```
+
+This does not bypass verification. It opens a normal browser session and saves the user-verified profile for later AutoPahe browser work when the site keeps that session valid.
 
 **Streaming**
 ```bash

@@ -365,54 +365,30 @@ atexit.register(cleanup_browsers)
 
 def setup_environment():
     """First-time setup to make the CLI runnable system-wide."""
-    import subprocess
-    import sys
-    from ap_core.platform_paths import get_config_dir, is_windows
+    from ap_core.browser import install_playwright_browser
+    from ap_core.platform_paths import get_config_dir
     
     # Write sample config to platform-appropriate location
     try:
         config_dir = get_config_dir()
         default_path = config_dir / 'config.ini'
-        write_sample_config(str(default_path))
-        print(f"✓ Sample config written to: {default_path}")
+        if default_path.exists():
+            print(f"✓ Config already exists: {default_path}")
+        else:
+            write_sample_config(str(default_path))
+            print(f"✓ Sample config written to: {default_path}")
     except Exception as e:
         print(f"Config setup skipped: {e}")
     
     # Install Playwright browser
-    print("🔧 Installing browser for automation...")
-    try:
-        # Try to install chrome first, fall back to chromium
-        os.environ['AUTOPAHE_BROWSER'] = 'chrome'
-        print("   Installing Chrome browser...")
-        rc = subprocess.run(
-            [sys.executable, '-m', 'playwright', 'install', 'chrome'],
-            check=False,
-            capture_output=True
-        )
-        if rc.returncode != 0:
-            print("   Chrome not available, trying Chromium...")
-            rc = subprocess.run(
-                [sys.executable, '-m', 'playwright', 'install', 'chromium'],
-                check=False,
-                capture_output=True
-            )
-            if rc.returncode != 0:
-                print("❌ Failed to install browser. Please run manually:")
-                print("   python -m playwright install chromium")
-                return False
-            os.environ['AUTOPAHE_BROWSER'] = 'chromium'
-        
-        print("✅ Setup completed successfully!")
-        print(f"\n📁 Config location: {default_path}")
-        print("   Edit with: autopahe config edit")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Setup failed: {e}")
-        print("\nPlease install Playwright manually:")
-        print("   pip install playwright")
-        print("   python -m playwright install chromium")
+    os.environ['AUTOPAHE_BROWSER'] = 'chromium'
+    if not install_playwright_browser("chromium"):
         return False
+
+    print("✅ Setup completed successfully!")
+    print(f"\n📁 Config location: {default_path}")
+    print("   Edit with: autopahe config edit")
+    return True
 
 def get_performance_stats():
     """Get performance statistics for the current session."""
@@ -753,7 +729,7 @@ def about():
         html = _prefetched_pages.get(episode_page_format)
         if not html:
             # Use Playwright to get synopsis directly
-            browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or 'chrome').lower()
+            browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or 'chromium').lower()
             context = get_pw_context(browser_choice, headless=True)
             if context:
                 page = context.new_page()
@@ -802,7 +778,7 @@ def download(arg=1, download_file=True, res = "720", prefer_dub=False):
         stream_page_url = f'https://animepahe.com/play/{state.session_id}/{episode_session}'
 
         # Navigate with shared Playwright context (headless) and extract links then the kwik page
-        browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or 'chrome').lower()
+        browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or 'chromium').lower()
         context = get_pw_context(browser_choice, headless=True)
         if context is None:
             logging.error("Playwright context not available")
@@ -1052,7 +1028,7 @@ def stream_episode(arg=1, player="default", res="720", prefer_dub=False):
         stream_page_url = f'https://animepahe.com/play/{state.anime_id}/{episode_session}'
 
         # Navigate with shared Playwright context (headless) and extract links then the kwik page
-        browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or 'chrome').lower()
+        browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or 'chromium').lower()
         try:
             context = get_pw_context(browser_choice, headless=True)
             if context is None:

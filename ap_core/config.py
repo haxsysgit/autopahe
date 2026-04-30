@@ -19,7 +19,7 @@ def _get_default_config_locations() -> List[Path]:
 DEFAULT_LOCATIONS = _get_default_config_locations()
 
 DEFAULTS = {
-    "browser": "chrome",
+    "browser": "chromium",
     "resolution": "720",
     "workers": "1",
     "download_dir": "",
@@ -181,8 +181,8 @@ def sample_config_text() -> str:
     
     return f"""# AutoPahe configuration
 [defaults]
-# Default browser: chrome, chromium, or firefox
-browser = chrome
+# Default browser: chromium, chrome, or firefox
+browser = chromium
 
 # Default resolution: 360, 480, 720, 1080, best, worst
 resolution = 720

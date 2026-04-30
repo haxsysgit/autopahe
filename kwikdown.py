@@ -127,13 +127,13 @@ def download_with_retries(session, posturl, params, headers, filename, ep, chunk
                 return False
 
 
-def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 300, ep=None, animename=None, quality=None):
+def kwik_download(url, browser="chromium", dpath=os.getcwd(), chunk_size=1024 * 300, ep=None, animename=None, quality=None):
     os.chdir(dpath)
 
     # Handle pahe.win redirect pages
     if 'pahe.win' in url:
         logging.debug('Detected pahe.win redirect page, extracting final URL...')
-        browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or browser or 'chrome').lower()
+        browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or browser or 'chromium').lower()
         try:
             context = get_pw_context(browser_choice, headless=True)
             if context is None:
@@ -180,7 +180,7 @@ def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 30
     session = setup_session()  # Robust session with retries
 
     # Use Playwright to get token and cookies
-    browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or browser or 'chrome').lower()
+    browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or browser or 'chromium').lower()
     user_data_dir = str(Path.home() / '.cache' / 'autopahe-pw' / browser_choice)
     try:
         context = get_pw_context(browser_choice, headless=True)
@@ -297,7 +297,7 @@ def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 30
     return download_with_retries(session, posturl, params, headers, target_filename, ep, chunk_size)
 
 
-def kwik_stream(url, browser="chrome", ep=None, animename=None):
+def kwik_stream(url, browser="chromium", ep=None, animename=None):
     """
     Extract direct video URL for streaming instead of downloading.
     Returns the video URL and headers needed for streaming.
@@ -307,7 +307,7 @@ def kwik_stream(url, browser="chrome", ep=None, animename=None):
     # Handle pahe.win redirect pages
     if 'pahe.win' in url:
         logging.debug('Detected pahe.win redirect page, extracting final URL...')
-        browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or browser or 'chrome').lower()
+        browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or browser or 'chromium').lower()
         try:
             context = get_pw_context(browser_choice, headless=True)
             if context is None:
@@ -337,7 +337,7 @@ def kwik_stream(url, browser="chrome", ep=None, animename=None):
     session = setup_session()  # Robust session with retries
 
     # Use Playwright to get token and cookies
-    browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or browser or 'chrome').lower()
+    browser_choice = (os.environ.get('AUTOPAHE_BROWSER') or browser or 'chromium').lower()
     try:
         context = get_pw_context(browser_choice, headless=True)
         if context is None:

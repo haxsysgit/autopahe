@@ -105,7 +105,10 @@ def _update_from_git(repo: Path) -> int:
 
 
 def _update_from_package() -> int:
-    if sys.prefix == getattr(sys, "base_prefix", sys.prefix) and shutil.which("pipx"):
+    if shutil.which("uv"):
+        print("No source checkout found. Updating installed tool with uv...")
+        result = _run(["uv", "tool", "upgrade", "autopahe"])
+    elif sys.prefix == getattr(sys, "base_prefix", sys.prefix) and shutil.which("pipx"):
         print("No source checkout found. Updating installed package with pipx...")
         result = _run(["pipx", "upgrade", "autopahe"])
     else:
@@ -114,6 +117,7 @@ def _update_from_package() -> int:
 
     if result.returncode != 0:
         _print_process_failure(result)
+        print("If AutoPahe was installed with uv, run: uv tool upgrade autopahe")
         print("If AutoPahe was installed with pipx, run: pipx upgrade autopahe")
         print("If it was installed with pip, run it from the same virtual environment and retry: autopahe --update")
         return result.returncode

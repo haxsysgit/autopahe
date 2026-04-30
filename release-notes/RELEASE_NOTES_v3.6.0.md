@@ -17,10 +17,10 @@
 
 ## Installation
 ```bash
-pip install autopahe==3.6.0
+uv tool install autopahe==3.6.0
 ```
 
 ## Updating
 ```bash
-autopahe --update
+uv tool upgrade autopahe
 ```

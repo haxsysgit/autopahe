@@ -13,9 +13,9 @@ Search AnimePahe, prepare browser-based episode downloads, stream where availabl
 
 ## 🚀 Installation
 
-**From PyPI (recommended):**
+**With uv (recommended):**
 ```bash
-pip install autopahe
+uv tool install autopahe
 autopahe --setup
 ```
 
@@ -23,16 +23,24 @@ autopahe --setup
 ```bash
 git clone https://github.com/haxsysgit/autopahe.git
 cd autopahe
-pip install -r requirements.txt
-playwright install chromium
+uv sync
+uv run playwright install chromium
+uv run autopahe --help
 ```
 
 **Update an existing install:**
 ```bash
-autopahe --update
+uv tool upgrade autopahe
 ```
 
-For source installs, this safely runs a fast-forward git update and refreshes dependencies. For PyPI installs, it upgrades the installed package and refreshes the Playwright browser.
+For source installs, run:
+```bash
+git pull --ff-only
+uv sync
+uv run playwright install chromium
+```
+
+`autopahe --update` is also available as a convenience command. For source checkouts, it safely runs a fast-forward git update and refreshes dependencies. For uv tool installs, prefer `uv tool upgrade autopahe`.
 
 **With Docker:**
 ```bash

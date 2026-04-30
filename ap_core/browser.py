@@ -246,9 +246,11 @@ def get_pw_context(browser_choice: str = None, headless: bool = True):
                                 return None
                         else:
                             print("\nYou can run setup later with: autopahe --setup")
+                            close_pw_context()
                             return None
                     except (EOFError, KeyboardInterrupt):
                         print("\n\nSetup cancelled. Run 'autopahe --setup' when ready.")
+                        close_pw_context()
                         return None
                 else:
                     # Non-interactive mode - show instructions
@@ -259,16 +261,19 @@ def get_pw_context(browser_choice: str = None, headless: bool = True):
                     print("This will install all dependencies and browser engines.")
                     print("After setup completes, run autopahe again.")
                     print("="*60)
+                    close_pw_context()
                     return None
             else:
                 # Different type of error
                 logging.error(f"Failed to start Playwright context: {e}")
                 print(f"❌ Browser error: {e}")
+                close_pw_context()
                 return None
                 
     except Exception as e:
         logging.error(f"Unexpected error in Playwright setup: {e}")
         print(f"❌ Setup error: {e}")
+        close_pw_context()
         return None
 
 

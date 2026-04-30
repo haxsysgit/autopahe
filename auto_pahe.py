@@ -16,16 +16,24 @@ from typing import Optional
 # Third-party imports
 import requests
 import typer
+import click
 from colorama import Fore, Style, init
 init()
 from rich.console import Console
 from rich.spinner import Spinner
 from rich.live import Live
 
-# Get version dynamically from package metadata
+# Get version dynamically from local source metadata first, then package metadata.
 try:
-    from importlib.metadata import version
-    AUTOPAHE_VERSION = version("autopahe")
+    import tomllib
+
+    pyproject_path = Path(__file__).with_name("pyproject.toml")
+    if pyproject_path.exists():
+        with pyproject_path.open("rb") as version_file:
+            AUTOPAHE_VERSION = tomllib.load(version_file)["project"]["version"]
+    else:
+        from importlib.metadata import version
+        AUTOPAHE_VERSION = version("autopahe")
 except (ImportError, Exception):
     AUTOPAHE_VERSION = "dev"  # Development fallback
 
@@ -105,7 +113,7 @@ def get_runtime_state(ctx: Optional[typer.Context] = None) -> AutoPaheState:
     if ctx is not None and isinstance(ctx.obj, AutoPaheState):
         return ctx.obj
 
-    current_ctx = typer.get_current_context(silent=True)
+    current_ctx = click.get_current_context(silent=True)
     if current_ctx is not None and isinstance(current_ctx.obj, AutoPaheState):
         return current_ctx.obj
 
@@ -126,6 +134,85 @@ _anime_cache = _cache_store['anime']
 def get_anime_cache_key(session_id):
     """Generate cache key for anime-specific data"""
     return f"anime_complete_{session_id}"
+
+
+VIDEO_EXTENSIONS = {".mp4", ".mkv", ".webm", ".avi", ".mov"}
+
+
+def _recent_video_candidates(download_dir: Path, started_at: float) -> list[Path]:
+    """Find likely browser-downloaded video files created after this command started."""
+    if not download_dir.exists():
+        return []
+
+    candidates = []
+    for path in download_dir.iterdir():
+        try:
+            if (
+                path.is_file()
+                and path.suffix.lower() in VIDEO_EXTENSIONS
+                and path.stat().st_size > 0
+                and path.stat().st_mtime >= started_at
+            ):
+                candidates.append(path)
+        except OSError:
+            continue
+
+    return sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def _confirm_browser_download(kwik_url: str, episode_path: Path, episode: int, quality: str) -> Optional[Path]:
+    """Guide the user through browser download and return a verified local file path."""
+    started_at = time.time()
+
+    print("\nBrowser download required")
+    print(f"  Anime: {get_runtime_state().anime_name or 'Unknown Anime'}")
+    print(f"  Episode: {episode}")
+    print(f"  Quality: {quality}p" if str(quality).isdigit() else f"  Quality: {quality}")
+    print(f"  Link: {kwik_url}")
+    print(f"  Expected folder: {DOWNLOADS}")
+    print(f"  Suggested filename: {episode_path.name}")
+
+    if not sys.stdin.isatty():
+        print("\nNon-interactive terminal detected. Open the link in your browser, then run record/sort commands after the file is downloaded.")
+        return None
+
+    while True:
+        response = input("\nDownload it in your browser, then press Enter to verify. Paste a file path, or type skip: ").strip()
+        if response.lower() in {"skip", "s", "cancel", "c"}:
+            return None
+
+        if response:
+            manual_path = Path(response).expanduser()
+            if manual_path.exists() and manual_path.is_file() and manual_path.stat().st_size > 0:
+                return manual_path
+            print(f"File not found or empty: {manual_path}")
+            continue
+
+        if episode_path.exists() and episode_path.stat().st_size > 0:
+            return episode_path
+
+        candidates = _recent_video_candidates(DOWNLOADS, started_at)
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            print("\nMultiple recent video files found:")
+            for idx, candidate in enumerate(candidates[:10], 1):
+                print(f"  [{idx}] {candidate}")
+            choice = input("Choose a number, paste a path, or type skip: ").strip()
+            if choice.isdigit():
+                selected = int(choice) - 1
+                if 0 <= selected < len(candidates[:10]):
+                    return candidates[selected]
+            elif choice.lower() in {"skip", "s", "cancel", "c"}:
+                return None
+            elif choice:
+                manual_path = Path(choice).expanduser()
+                if manual_path.exists() and manual_path.is_file() and manual_path.stat().st_size > 0:
+                    return manual_path
+            print("No valid file selected.")
+            continue
+
+        print(f"No completed video file found in {DOWNLOADS}.")
 
 
 def fetch_episode_page(session_id, page_num=1, use_cache=True):
@@ -398,8 +485,8 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
     # Display progress indicator and search banner
     Banners.progress_indicator("searching")
 
-    # API endpoint for search (prefer .si, fallback to .com)
-    api_url = f'https://animepahe.si/api?m=search&q={arg}'
+    # API endpoint for search (prefer .pw, fallback to .com/.org)
+    api_url = f'https://animepahe.pw/api?m=search&q={arg}'
     search_response = None
 
     try:
@@ -455,7 +542,7 @@ def lookup(arg, year_filter=None, status_filter=None, enable_fuzzy=True):
                 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
                 'Accept': 'application/json'
             }
-            for base in ("https://animepahe.si", "https://animepahe.com", "https://animepahe.ru"):
+            for base in ("https://animepahe.pw", "https://animepahe.com", "https://animepahe.org"):
                 try:
                     spinner.update_text(f"Searching on {base}...")
                     url = f"{base}/api"
@@ -614,7 +701,7 @@ def index(arg):
                 'year': anime_data.get('year', 'N/A'),
                 'type': anime_data.get('type', 'N/A'),
                 'status': anime_data.get('status', 'N/A'),
-                'image': f"https://animepahe.si{anime_data.get('poster', '')}" if anime_data.get('poster') and not anime_data.get('poster', '').startswith('http') else anime_data.get('poster', 'No image available'),
+                'image': f"https://animepahe.pw{anime_data.get('poster', '')}" if anime_data.get('poster') and not anime_data.get('poster', '').startswith('http') else anime_data.get('poster', 'No image available'),
                 'homepage': state.episode_page_format,
                 'episode_count': 'N/A',
                 'first_episode': 'N/A',
@@ -628,7 +715,7 @@ def index(arg):
                 'year': anime_data.get('year', 'N/A'),
                 'type': anime_data.get('type', 'N/A'),
                 'status': anime_data.get('status', 'N/A'),
-                'image': f"https://animepahe.si{anime_data.get('poster', '')}" if anime_data.get('poster') and not anime_data.get('poster', '').startswith('http') else anime_data.get('poster', 'No image available'),
+                'image': f"https://animepahe.pw{anime_data.get('poster', '')}" if anime_data.get('poster') and not anime_data.get('poster', '').startswith('http') else anime_data.get('poster', 'No image available'),
                 'homepage': state.episode_page_format,
                 'episode_count': len(jsonpage_dict.get('data', [])),
                 'first_episode': jsonpage_dict['data'][0]['episode'] if jsonpage_dict.get('data') else 'N/A',
@@ -831,9 +918,6 @@ def download(arg=1, download_file=True, res = "720", prefer_dub=False):
     # print(f"\nEpisode {arg} Download link => {kwik}\n")
 
     if download_file:
-        # Show download progress using structured design
-        Banners.download_progress(state.anime_name or "Unknown Anime", arg)
-
         # Build a stable filename based on display title, episode and quality
         safe_name = _build_safe_filename(state.anime_name or "Unknown Anime", ep=arg, quality=res)
         episode_path = DOWNLOADS / safe_name
@@ -847,24 +931,22 @@ def download(arg=1, download_file=True, res = "720", prefer_dub=False):
             quality=res
         )
 
-        # Trigger the download process using the kwik link and specify the download directory
-        result = kwik_download(url=kwik, dpath=DOWNLOADS, ep=arg, animename=state.anime_name or "Unknown Anime", quality=res)
-        
-        # Track download in collection manager
-        if result is not False:  # kwik_download returns False on failure
-            # Mark download as completed in resume manager
+        downloaded_file = _confirm_browser_download(kwik, episode_path, arg, str(res))
+
+        if downloaded_file:
             resume_manager.mark_completed(download_id)
-            
-            # Add to collection manager (without organizing - --sort handles that)
             cm = get_collection_manager()
-            entry = cm.add_anime(state.anime_name or "Unknown Anime")
-            episode_file = str(episode_path)
+            cm.add_anime(state.anime_name or "Unknown Anime")
+            episode_file = str(downloaded_file)
             cm.add_episode_file(state.anime_name or "Unknown Anime", arg, episode_file, organize=False)
-            Banners.success_message(f"Added episode {arg} to collection for '{state.anime_name or 'Unknown Anime'}'")
-        else:
-            # Mark download as failed in resume manager
-            resume_manager.mark_failed(download_id, "Download failed")
+            Banners.success_message(f"Verified episode {arg} and added it to collection for '{state.anime_name or 'Unknown Anime'}'")
+            return True
+
+        resume_manager.mark_failed(download_id, "Browser download not verified")
+        print("Episode was not marked as downloaded because no local file was verified.")
+        return False
     else:
+        print(f"\nEpisode {arg} Download link => {kwik}\n")
         return kwik
 
 
@@ -964,7 +1046,7 @@ def stream_episode(arg=1, player="default", res="720", prefer_dub=False):
             print(f"{log_prefix}🔄 No cached streaming data, fetching from play page...")
         
         # Construct the API URL to get the download page for the selected episode
-        api_url = f'https://animepahe.si/api?m=release&id={state.anime_id}&session={episode_session}'
+        api_url = f'https://animepahe.pw/api?m=release&id={state.anime_id}&session={episode_session}'
         
         # Construct the URL for the stream page for the specific episode using the session ID
         stream_page_url = f'https://animepahe.com/play/{state.anime_id}/{episode_session}'
@@ -1186,9 +1268,12 @@ def multi_download(arg: str, download_file=True, resolution="720", max_workers=1
     
     for ep in eps:
         try:
-            download(arg=ep, download_file=download_file, res=str(resolution), prefer_dub=prefer_dub)
-            completed += 1
-            Banners.success_message(f"Episode {ep} completed successfully ({completed}/{len(eps)})")
+            result = download(arg=ep, download_file=download_file, res=str(resolution), prefer_dub=prefer_dub)
+            if result:
+                completed += 1
+                Banners.success_message(f"Episode {ep} completed successfully ({completed}/{len(eps)})")
+            else:
+                failed.append(ep)
         except Exception as e:
             failed.append(ep)
             logging.error(f"Episode {ep} failed: {e}")
@@ -1199,6 +1284,8 @@ def multi_download(arg: str, download_file=True, resolution="720", max_workers=1
             notify_download_failed(state.anime_name or "Unknown Anime", f"Failed: {', '.join(map(str, failed))}")
         else:
             notify_download_complete(state.anime_name or "Unknown Anime", arg)
+
+    return completed == len(eps)
 
 
 
@@ -1503,9 +1590,9 @@ def command_main(args, ctx: Optional[typer.Context] = None):
     # Single Download function
     if sdarg:
         records.append(sdarg)
-        download(sdarg, res=parg, prefer_dub=args.dub)
-        process_record(records, update=True, quiet=True)
-        did_download = True
+        if download(sdarg, res=parg, prefer_dub=args.dub):
+            process_record(records, update=True, quiet=True)
+            did_download = True
 
     if starg:
         if iarg is None and not state.session_id:
@@ -1526,9 +1613,7 @@ def command_main(args, ctx: Optional[typer.Context] = None):
         did_download = True
 
     if larg:
-        records.append(larg)
         download(larg, download_file=False, res=parg, prefer_dub=args.dub)
-        process_record(records, update=True, quiet=True)
 
 
     # Handle batch/season selection
@@ -1544,15 +1629,15 @@ def command_main(args, ctx: Optional[typer.Context] = None):
     # Multi Download function
     if mdarg:
         records.append(mdarg)
-        multi_download(mdarg, download_file=True, resolution=parg, max_workers=args.workers, enable_notifications=enable_notifications, prefer_dub=args.dub)
-        process_record(records, update=True, quiet=True)
-        did_download = True
+        if multi_download(mdarg, download_file=True, resolution=parg, max_workers=args.workers, enable_notifications=enable_notifications, prefer_dub=args.dub):
+            process_record(records, update=True, quiet=True)
+            did_download = True
 
     if mlarg:
         records.append(mlarg)
-        multi_download(mlarg, download_file=False, resolution=parg, max_workers=args.workers, enable_notifications=enable_notifications, prefer_dub=args.dub)
-        process_record(records, update=True, quiet=True)
-        did_download = True
+        if multi_download(mlarg, download_file=False, resolution=parg, max_workers=args.workers, enable_notifications=enable_notifications, prefer_dub=args.dub):
+            process_record(records, update=True, quiet=True)
+            did_download = True
 
     
 

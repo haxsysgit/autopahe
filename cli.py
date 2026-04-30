@@ -188,8 +188,8 @@ def cli_main(
     browser: Optional[str] = typer.Option(None, "-b", "--browser", help="Select Playwright browser"),
     search: Optional[str] = typer.Option(None, "-s", "--search", help="Search for an anime by name"),
     index: Optional[int] = typer.Option(None, "-i", "--index", help="Specify the index of the desired anime from the search results"),
-    single_download: Optional[int] = typer.Option(None, "-d", "--single_download", "--single-download", help="Download a single episode of an anime"),
-    multi_download: Optional[str] = typer.Option(None, "--multi_download", "--multi-download", help="Download multiple episodes of an anime (e.g., 1-12)"),
+    single_download: Optional[int] = typer.Option(None, "-d", "--single_download", "--single-download", help="Prepare a browser download for a single episode"),
+    multi_download: Optional[str] = typer.Option(None, "--multi_download", "--multi-download", help="Prepare browser downloads for multiple episodes (e.g., 1-12)"),
     stream: Optional[str] = typer.Option(None, "--stream", help="Stream episode instead of downloading (e.g., 1 or 1-3)"),
     player: str = typer.Option("default", "--player", help="Media player for streaming (default: auto-detect)"),
     link: Optional[str] = typer.Option(None, "-l", "--link", help="Display the link to the kwik download page"),
@@ -210,6 +210,7 @@ def cli_main(
     dub: bool = typer.Option(False, "--dub", help="Prefer English dubbed versions (default: subbed)"),
     cache: Optional[str] = typer.Option(None, "--cache", help="Cache management: clear (remove all) or stats (show info)"),
     setup: bool = typer.Option(False, "--setup", help="Initial setup: write config and install browser"),
+    update: bool = typer.Option(False, "--update", help="Update AutoPahe and refresh dependencies"),
     no_fuzzy: bool = typer.Option(False, "--no-fuzzy", help="Disable fuzzy search (exact match only)"),
     fuzzy_threshold: float = typer.Option(0.6, "--fuzzy-threshold", help="Fuzzy search similarity threshold (0.0-1.0, default: 0.6)"),
     resume: bool = typer.Option(False, "--resume", help="Resume interrupted downloads from previous session"),
@@ -275,6 +276,11 @@ def cli_main(
         core.setup_environment()
         return
 
+    if update:
+        from ap_core.updater import self_update
+
+        raise typer.Exit(self_update())
+
     if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
         logging.debug("Verbose logging enabled")
@@ -321,6 +327,7 @@ def cli_main(
         dub=dub,
         cache=cache,
         setup=setup,
+        update=update,
         no_fuzzy=no_fuzzy,
         fuzzy_threshold=fuzzy_threshold,
         resume=resume,
@@ -354,6 +361,7 @@ def cli_main(
             bool(args.sort_path),
             bool(args.sort_dry_run),
             bool(args.cache),
+            bool(args.update),
             bool(args.summary),
             args.year is not None,
             bool(args.status),
@@ -388,8 +396,8 @@ def cli_main(
         print("  📺 BASIC OPERATIONS:")
         print("  -s, --search <query>          Search for anime (typos auto-corrected!)")
         print("  -i, --index <n>               Select anime index from search results")
-        print("  -d, --single_download <ep>    Download a single episode")
-        print("  -md, --multi_download <spec>  Download multiple episodes (e.g., 1-5 or 1,3,5)")
+        print("  -d, --single_download <ep>    Prepare a browser download for one episode")
+        print("  -md, --multi_download <spec>  Prepare browser downloads (e.g., 1-5 or 1,3,5)")
         print("  -a, --about                   Show anime overview")
         print("  -p, --resolution <720|1080>   Choose resolution")
         print("  -w, --workers <n>             Parallel downloads (use >1 with caution)")
@@ -406,6 +414,7 @@ def cli_main(
         print("  -R, --records [...]           Manage records (view/search/delete/...)")
         print("      --sort [all|rename|organize]  Sort downloaded files")
         print("      --cache [clear|stats]     Manage cache and cookies")
+        print("      --update                  Update AutoPahe and refresh dependencies")
         print("      --year <YYYY>             Filter by year")
         print("      --status <text>           Filter by status (e.g., Finished Airing)")
         print("      --season <n>              Download a whole season (12-13 eps)")

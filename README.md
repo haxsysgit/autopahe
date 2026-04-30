@@ -7,9 +7,9 @@
 
 # AutoPahe
 
-> **Download and stream anime from AnimePahe**
+> **Search AnimePahe, prepare browser downloads, stream, and track episodes**
 
-Search, download, and stream anime episodes. Cross-platform (Windows, Mac, Linux).
+Search AnimePahe, prepare browser-based episode downloads, stream where available, and manage records. Cross-platform (Windows, Mac, Linux).
 
 ## 🚀 Installation
 
@@ -26,6 +26,13 @@ cd autopahe
 pip install -r requirements.txt
 playwright install chromium
 ```
+
+**Update an existing install:**
+```bash
+autopahe --update
+```
+
+For source installs, this safely runs a fast-forward git update and refreshes dependencies. For PyPI installs, it upgrades the installed package and refreshes the Playwright browser.
 
 **With Docker:**
 ```bash
@@ -67,10 +74,10 @@ docker\docker-run.bat run --help
 # Search for anime
 autopahe -s "anime name"
 
-# Download episode 1
+# Prepare browser download for episode 1
 autopahe -s "anime name" -i 0 -d 1
 
-# Download episodes 1-12
+# Prepare browser downloads for episodes 1-12
 autopahe -s "anime name" -i 0 -md 1-12
 
 # Stream episode 1
@@ -91,9 +98,9 @@ autopahe -s "naruto" --year 2002 --status "Finished Airing"
 autopahe -s "jujutsu kaisen" --no-fuzzy
 ```
 
-**Downloads**
+**Browser Downloads**
 ```bash
-# Single episode
+# Single episode: prints the browser link, then verifies the downloaded file
 autopahe -s "demon slayer" -i 0 -d 1
 
 # Range and list formats
@@ -103,6 +110,8 @@ autopahe -s "bleach" -i 0 -md "1,3,5-7"
 # Whole season shortcut (12 eps per season)
 autopahe -s "attack on titan" -i 0 --season 1
 ```
+
+Kwik requires a regular browser for downloads. `-d` and `-md` guide you through opening the generated link and only mark an episode downloaded after a local video file is verified. Use `-l` when you only want the link without record updates.
 
 **Streaming**
 ```bash

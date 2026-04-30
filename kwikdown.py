@@ -28,6 +28,21 @@ def setup_session(retries=5):
     return session
 
 
+def _is_security_challenge(content: str) -> bool:
+    text = (content or "").lower()
+    return (
+        "performing security verification" in text
+        or ("cloudflare" in text and "not a bot" in text)
+        or "just a moment" in text
+    )
+
+
+def _print_security_challenge(url: str) -> None:
+    print("Kwik security verification blocked the automated download page.")
+    print(f"  URL: {url}")
+    print("  Try again later, or use -l/--link and open the generated link in a regular browser.")
+
+
 def _build_safe_filename(animename, ep=None, quality=None):
     """Build a filesystem-safe filename like 'AnimePahe_Eighty_Six_22_720p.mp4'.
 
@@ -79,14 +94,14 @@ def download_with_retries(session, posturl, params, headers, filename, ep, chunk
                 print(f"  Referer: {headers.get('Referer','')}")
                 print(f"  Post URL: {posturl}")
                 print(f"  Hints: Ensure the kwik form token is valid and not expired; try again after a short wait.")
-                return
+                return False
             if response.status_code not in (200, 206):
                 print(f"Unexpected status code: {response.status_code}")
                 print(f"  UA: {headers.get('User-Agent','')[:120]}")
                 print(f"  Origin: {headers.get('Origin','')}")
                 print(f"  Referer: {headers.get('Referer','')}")
                 print(f"  Post URL: {posturl}")
-                return
+                return False
 
             # Total size = server content + local file (for resume)
             total_size = int(response.headers.get("content-length", 0)) + file_size
@@ -102,14 +117,14 @@ def download_with_retries(session, posturl, params, headers, filename, ep, chunk
                     if chunk:
                         f.write(chunk)
                         bar.update(len(chunk))
-            return  # Success
+            return True
         except Exception as e:
             print(f"Attempt {attempt}/{retries} failed: {e}")
             if attempt < retries:
                 time.sleep(3)
             else:
                 print("Download failed after all retries.")
-                return
+                return False
 
 
 def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 300, ep=None, animename=None, quality=None):
@@ -123,7 +138,7 @@ def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 30
             context = get_pw_context(browser_choice, headless=True)
             if context is None:
                 print('Playwright context not available')
-                return
+                return False
             page = context.new_page()
             page.goto(url, wait_until='domcontentloaded', timeout=60000)
             
@@ -150,14 +165,14 @@ def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 30
                     else:
                         logging.debug('Could not find kwik.cx URL in JavaScript')
                         page.close()
-                        return
+                        return False
                 except Exception as js_e:
                     logging.debug(f'Failed to extract from JavaScript: {js_e}')
                     page.close()
-                    return
+                    return False
         except Exception as e:
             print(f'Failed to handle pahe.win redirect: {e}')
-            return
+            return False
 
     posturl = url.replace("/f/", "/d/")  # Build POST endpoint based on pattern
 
@@ -171,7 +186,7 @@ def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 30
         context = get_pw_context(browser_choice, headless=True)
         if context is None:
             print('Playwright context not available')
-            return
+            return False
         page = context.new_page()
         page.goto(url, wait_until='domcontentloaded', timeout=60000)
         # Wait for form and potential countdown
@@ -183,10 +198,16 @@ def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 30
 
         form = page.query_selector('form')
         if not form:
+            page_content = page.content()
+            if _is_security_challenge(page_content):
+                _print_security_challenge(url)
+                page.close()
+                return False
+
             # Debug: Save HTML content to file for inspection
             debug_file = f"kwik_debug_{ep}_{url.replace('/', '_').replace(':', '')}.html"
             with open(debug_file, 'w', encoding='utf-8') as f:
-                f.write(page.content())
+                f.write(page_content)
             print(f'Could not locate download form on kwik page')
             logging.debug(f'Page content saved to {debug_file}')
             logging.debug(f'URL was: {url}')
@@ -205,13 +226,13 @@ def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 30
             logging.debug(f'First 1000 chars of page content: {page.content()[:1000]}')
             
             page.close()
-            return
+            return False
         
         hidden_input = form.query_selector('input[type="hidden"]')
         if not hidden_input:
             page.close()
             print('Could not extract CSRF token')
-            return
+            return False
         token = hidden_input.get_attribute('value')
         # Capture the actual browser user agent from Playwright
         try:
@@ -230,7 +251,7 @@ def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 30
         page.close()
     except Exception as e:
         print('Playwright failed to capture token/cookies:', e)
-        return
+        return False
 
     # Construct realistic headers (mimic the browser actually used)
     parsed = urlparse(url)
@@ -273,7 +294,7 @@ def kwik_download(url, browser="chrome", dpath=os.getcwd(), chunk_size=1024 * 30
         target_filename = "video.mp4"
 
     # Call the actual download function
-    download_with_retries(session, posturl, params, headers, target_filename, ep, chunk_size)
+    return download_with_retries(session, posturl, params, headers, target_filename, ep, chunk_size)
 
 
 def kwik_stream(url, browser="chrome", ep=None, animename=None):
@@ -328,8 +349,12 @@ def kwik_stream(url, browser="chrome", ep=None, animename=None):
         # Extract form and token
         form = page.query_selector('form')
         if not form:
+            page_content = page.content()
+            if _is_security_challenge(page_content):
+                _print_security_challenge(url)
+            else:
+                print('Could not find form on page')
             page.close()
-            print('Could not find form on page')
             return None, None
         
         hidden = form.query_selector('input[type="hidden"]')

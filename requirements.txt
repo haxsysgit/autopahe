@@ -5,3 +5,4 @@ playwright==1.56.0
 colorama>=0.4.6
 rich>=13.0.0
 typer>=0.12.5
+click>=8.0.0

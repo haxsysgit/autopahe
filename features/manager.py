@@ -570,7 +570,7 @@ sample = [
         'season': 'Spring',
         'year': 2016,
         'score': 7.27,
-        'poster': 'https://i.animepahe.ru/posters/3c01c83a35626201293b677d166226fcef7e13b00b875991907f1a54aebad626.jpg',
+        'poster': 'https://i.animepahe.org/posters/3c01c83a35626201293b677d166226fcef7e13b00b875991907f1a54aebad626.jpg',
         'session': 'fccced41-eb03-ea7c-ceaf-13b40bad9cd3'
     },
     'The world is in the midst of the industrial revolution when horrific creatures emerge from a mysterious virus...'

@@ -1,6 +1,6 @@
 [project]
 name = "autopahe"
-version = "3.6.0"
+version = "3.6.1"
 description = "Cross-platform AnimePahe assistant for search, browser download handoff, smart tracking, sorting, streaming, filters, and record management"
 readme = "README.md"
 requires-python = ">=3.10"
